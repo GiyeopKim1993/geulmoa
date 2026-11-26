@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f7f2">
+  <meta name="description" content="화면에 쓴 손글씨로 나만의 한글 폰트를 만드는 실험실">
+  <title>글모아 — 나의 글씨가 폰트가 되는 곳</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23292a2b'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='42' fill='%23f7f5ec' font-family='sans-serif'%3E%E3%85%8E%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="coloring.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="top-inner wrap">
+      <a class="brand" href="#top" aria-label="글모아 처음으로">
+        <span class="brand-mark">ㅎ<span class="brand-dot"></span></span>
+        <span class="brand-name">글모아<span>손글씨 폰트 스튜디오</span></span>
+      </a>
+      <nav class="top-nav" aria-label="페이지 이동">
+        <a href="#studio">글씨 쓰기</a><a href="#preview">미리보기</a>
+      </nav>
+      <div class="top-local"><span class="local-dot"></span> 내 기기에서 작업 중</div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero wrap">
+      <div class="hero-text">
+        <div class="eyebrow"><span class="eyebrow-dot"></span> HANDWRITING FONT STUDIO <span class="beta">BETA</span></div>
+        <h1>당신의 글씨를,<br><span>오래도록.</span><i aria-hidden="true">✳</i></h1>
+        <p>익숙한 한 획 한 획을 모아, 세상에 하나뿐인<br class="desktop-only"> 나만의 한글 폰트로 만들어 보세요.</p>
+        <div class="hero-tags"><span><b>✦</b> 25개 대표 음절</span><span><b>✦</b> TTF 다운로드</span><span><b>✦</b> 서버 업로드 없음</span></div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="art-asterisk">✳</div><div class="art-sheet sheet-back"></div>
+        <div class="art-sheet sheet-front"><small>YOUR OWN HANDWRITING</small><div>가나다</div><span>당신의 글씨, 그대로</span><i></i><i></i><i></i></div>
+        <div class="art-tag"><span>✦</span> JUST LIKE YOU</div>
+      </div>
+    </section>
+
+    <section class="howbar wrap" aria-label="진행 순서">
+      <div class="how-item current"><span>01</span><div><b>글씨 쓰기</b><small>화면에 직접</small></div></div>
+      <div class="how-line"></div>
+      <div class="how-item"><span>02</span><div><b>모양 조합</b><small>문맥별로 다르게</small></div></div>
+      <div class="how-line"></div>
+      <div class="how-item"><span>03</span><div><b>폰트 완성</b><small>미리 보고 다운로드</small></div></div>
+    </section>
+
+    <section class="studio wrap" id="studio" aria-labelledby="studio-title">
+      <div class="section-heading"><div><div class="section-kicker">YOUR WORKSPACE <span>01 / 03</span></div><h2 id="studio-title">한 글자씩, 시작해 볼까요?</h2><p>글자를 한 번에 쓴 다음, 초성·중성·종성을 색칠해서 나눠요.</p></div><div class="desktop-hint"><span>✎</span> 펜 · 손가락 · 마우스 모두 가능</div></div>
+      <div class="workspace">
+        <aside class="panel sample-panel" aria-label="쓸 글자 목록">
+          <div class="panel-top"><div><span class="tiny-label">SAMPLE LIST</span><h3>나의 글자들</h3></div><button class="icon-button reset-button" id="reset-all" type="button" title="모든 필기 초기화" aria-label="모든 필기 초기화">↺</button></div>
+          <div class="completion"><div><span>기초 음절</span><b id="base-progress">0 / 16</b></div><div class="progress-track"><span id="base-bar"></span></div><small>먼저 16자를 채우면 좋아요</small></div>
+          <div id="sample-groups" class="sample-groups"></div>
+          <div class="add-sample"><label for="custom-char">원하는 글자 더 쓰기 <span>선택</span></label><div class="add-row"><input id="custom-char" maxlength="3" type="text" placeholder="예: 국" autocomplete="off" aria-describedby="custom-help"><button id="add-custom" type="button" aria-label="글자 추가">＋</button></div><small id="custom-help">추가한 음절도 문맥별 조합에 사용돼요.</small><p class="field-error" id="custom-error" role="status"></p></div>
+        </aside>
+
+        <section class="panel drawing-panel" aria-labelledby="drawing-title">
+          <div class="drawing-top"><div><span class="tiny-label" id="sample-category">기초 음절</span><h3 id="drawing-title">화면에 글씨를 써 주세요</h3></div><span class="page-count" id="sample-number">01 <i>/</i> 42</span></div>
+          <div class="current-sample"><div class="sample-character" id="target-char" aria-label="이번에 쓸 글자">는</div><div class="sample-copy"><span>이번에 쓸 글자</span><b id="target-hint">글자를 평소처럼 한 번에 써 주세요</b><small id="context-hint">가로 모음 · 받침 있음</small></div><div class="sample-spark" aria-hidden="true">✳</div></div>
+          <div class="workflow" role="group" aria-label="필기와 자모 색칠 단계">
+            <button type="button" id="mode-draw" class="workflow-step active" aria-pressed="true"><span>01</span><b>글자 쓰기</b><small>평소처럼 한 번에</small></button>
+            <button type="button" id="mode-color" class="workflow-step" aria-pressed="false" disabled><span>02</span><b>자모 색칠</b><small>색으로 나누기</small></button>
+          </div>
+          <div class="role-heading"><div><span class="role-step" id="role-count">1 / 2</span><b id="role-prompt">글자를 평소처럼 써 주세요</b></div><button id="remove-custom" class="remove-custom" type="button" hidden>이 추가 글자 삭제</button></div>
+          <div class="role-tabs" id="role-tabs" aria-label="색칠할 자모 선택" hidden></div>
+          <div id="paint-controls" class="paint-controls" hidden>
+            <div class="paint-tools"><label for="brush-size">붓 크기</label><input id="brush-size" type="range" min="3" max="24" value="12" step="1" aria-describedby="brush-size-label"><output id="brush-size-label" for="brush-size">12%</output><button type="button" id="paint-erase" class="paint-eraser" aria-pressed="false">색 지우개</button></div>
+            <div class="coloring-meter"><div><span id="paint-status" role="status" aria-live="polite">칠하지 않은 획 100%</span><button type="button" id="clear-colors">색칠만 초기화</button></div><div class="progress-track"><span id="paint-bar"></span></div></div>
+          </div>
+          <div class="board" id="board">
+            <canvas id="pad" width="720" height="720" aria-label="손글씨 입력 영역. 한 글자를 한 번에 쓰세요."></canvas>
+            <div class="brush-cursor" id="brush-cursor" hidden aria-hidden="true"></div>
+            <div class="pad-empty" id="pad-empty" aria-hidden="true"><span>✎</span><p>한 글자를<br>한 번에 써 주세요</p></div>
+          </div>
+          <div class="pad-tools"><div class="pad-tool-group"><button id="undo" class="text-button" type="button"><span>↶</span> 되돌리기</button><button id="clear-char" class="text-button" type="button"><span>×</span> 이 글자 지우기</button></div><span class="ink-note"><i></i> 원본 획 저장</span></div>
+          <p class="pad-hint"><span>i</span><b id="pad-instruction">초성·중성·종성을 나누지 말고, 글자 전체를 평소처럼 써 주세요.</b></p>
+          <div class="draw-actions"><button class="button button-light" id="prev-char" type="button"><span>←</span> 이전 글자</button><button class="skip-button" id="skip-char" type="button">건너뛰기</button><button class="button button-primary" id="next-step" type="button">다음: 자모 색칠 <span>→</span></button></div>
+          <p class="inline-message" id="draw-message" role="status" aria-live="polite"></p>
+        </section>
+
+        <aside class="explain-stack" aria-label="글자 조합 설명">
+          <div class="insight-card"><span class="tiny-label">A LITTLE DETAIL</span><div class="insight-spark">✳</div><h3>같은 ㄱ도<br>다르게 쓰니까.</h3><p>모음의 방향과 받침에 따라 달라지는 모양까지 살펴요.</p><div class="examples" aria-label="글자 구조 예시"><div><b>가</b><span>세로 모음</span></div><div><b>고</b><span>가로 모음</span></div><div><b>각</b><span>받침 있음</span></div></div><small>입력한 모양 중 가까운 형태를 골라 조합합니다. 예시는 시스템 글꼴이에요.</small></div>
+          <div class="note-card"><div class="note-icon">✳</div><div><b>쓴 다음, 색으로 나눠요</b><p>글자를 통째로 쓴 뒤 초성·중성·종성을 선택해서 획 위에 색칠해요. 닿은 획도 직접 구분할 수 있어요.</p></div></div>
+          <div class="note-card"><div class="note-icon lock-icon">⌁</div><div><b>손글씨는 이 기기에만</b><p>필기와 폰트 생성은 브라우저에서 처리돼요. 작업 내용은 이 브라우저에 저장됩니다.</p></div></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="preview-section wrap" id="preview" aria-labelledby="preview-title">
+      <div class="section-heading preview-heading"><div><div class="section-kicker">A FIRST LOOK <span>02 / 03</span></div><h2 id="preview-title">내 글씨로, 직접 써 보세요.</h2><p>모은 글자를 조합해 미리 보고 폰트 파일로 저장할 수 있어요.</p></div><div class="preview-ornament" aria-hidden="true">가 <span>→</span> ㅎ</div></div>
+      <div class="preview-grid">
+        <div class="panel preview-panel">
+          <div class="preview-panel-head"><div><span class="tiny-label">TYPE SOMETHING</span><h3>나의 폰트 미리보기</h3></div><span id="font-state" class="status-pill">생성 전 · 시스템 글꼴</span></div>
+          <label class="sr-only" for="preview-text">미리 볼 문장</label>
+          <textarea id="preview-text" spellcheck="false">안녕하세요, 반가워요.
+다람쥐 헌 쳇바퀴에 타고파</textarea>
+          <div class="preview-foot"><span>↳ 문장을 직접 바꿔 보세요</span><span id="preview-missing"></span></div>
+          <div class="inspector"><div><span class="tiny-label">CHARACTER CHECK</span><b>한 글자 살펴보기</b></div><label class="sr-only" for="inspect-char">확인할 한글 음절</label><input id="inspect-char" type="text" maxlength="3" value="한" aria-describedby="inspect-status"><div class="inspect-status" id="inspect-status">폰트를 생성하면 확인할 수 있어요.</div><button class="inspect-add" id="inspect-add" type="button">이 글자 직접 쓰기 ↗</button></div>
+        </div>
+        <div class="panel export-panel">
+          <span class="tiny-label">MAKE YOUR FONT</span><h3>이제, 폰트로<br>만들어 볼까요?</h3><p>색칠을 완료한 글자만 사용해요. 적은 글자로 만들면 일부 음절은 폰트에서 빠질 수 있습니다.</p>
+          <label for="font-name">폰트 이름</label><input id="font-name" type="text" value="My Hand" maxlength="40" autocomplete="off">
+          <button class="button button-primary build-button" id="build-font" type="button">내 폰트 만들기 <span>↗</span></button>
+          <a class="button button-dark download-button" id="download-font" href="#" hidden download>TTF 다운로드 <span>↓</span></a>
+          <div class="build-progress" id="build-progress" hidden><span></span></div><p class="build-status" id="build-status" role="status" aria-live="polite">작성한 글씨는 자동 저장돼요.</p>
+          <div class="export-divider"></div><div class="privacy-line"><span>◎</span> 손글씨는 서버로 전송되지 않아요</div>
+        </div>
+      </div>
+      <div class="result-info" id="result-info" hidden>
+        <div class="result-stats"><div><span>지원 한글 음절</span><strong id="stat-coverage">0 <small>/ 11,172</small></strong></div><div><span>직접 쓴 음절</span><strong id="stat-original">0 <small>자</small></strong></div><div><span>문맥별 자모 샘플</span><strong id="stat-context">0 <small>개</small></strong></div><div><span>숫자 · 기호</span><strong id="stat-extra">0 <small>자</small></strong></div></div>
+        <p id="result-warning" class="result-warning"></p><div id="suggestions" class="suggestions"></div>
+        <p class="result-caveat">직접 쓴 음절은 원본을 사용하고, 나머지는 수집한 자모를 조합하거나 추정합니다. 겹받침·복합 모음 등은 실제 필체와 다르거나 어색할 수 있으니 반드시 확인해 주세요. 영문은 아직 지원하지 않습니다.</p>
+      </div>
+    </section>
+
+    <section class="bottom-note wrap"><div class="bottom-spark">✳</div><div><b>조금 삐뚤어도 괜찮아요.</b><p>나를 닮은 글씨에는 나만의 이야기가 있으니까요.</p></div><a href="#studio">처음으로 돌아가기 ↑</a></section>
+  </main>
+  <footer class="footer wrap"><div><b>글모아</b><span>당신의 글씨를 오래도록.</span></div><p>실험용 프로토타입 · 기반 코드 <a href="https://github.com/maxi08aidot/kor-your-font" target="_blank" rel="noopener noreferrer">kor-your-font</a> · <a href="third-party-licenses.txt" target="_blank" rel="noopener noreferrer">라이선스</a></p></footer>
+</body>
+</html>

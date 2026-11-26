@@ -1,0 +1,21 @@
+{
+  "name": "geulmoa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "화면에서 쓰는 손글씨로 한글 TTF를 만드는 실험용 사이트",
+  "scripts": {
+    "build": "esbuild site/worker.src.js --bundle --minify --platform=browser --format=iife --outfile=site/worker.js",
+    "start": "node serve.js",
+    "test": "node tests/context.test.js && node tests/capture.test.js && node tests/engine.test.js && node tests/coloring.test.js",
+    "test:browser": "node tests/browser-coloring.test.js"
+  },
+  "dependencies": {
+    "imagetracerjs": "1.2.6",
+    "svg2ttf": "6.1.0",
+    "svgpath": "2.6.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "playwright": "1.65.1"
+  }
+}
