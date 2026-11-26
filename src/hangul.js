@@ -181,18 +181,20 @@ function slots(vowel, final) {
   return { L: { x: 75, y: 55, sx: 0.85, sy: 0.29 }, V: { x: 75, y: 375, sx: 0.85, sy: 0.25 }, T };
 }
 
-function composeSyllable(parts, lead, vowel, final, { preserve = false, variations = null } = {}) {
+function composeSyllable(parts, lead, vowel, final, { preserve = false, variations = null, composer = null, targetChar = '' } = {}) {
   const s = slots(vowel, final);
-  const target = { lead, vowel, final };
+  const target = { lead, vowel, final, char: targetChar };
   const partFor = (role, char) => {
     const key = componentKey(role, char);
     const variant = selectVariation(variations, key, role, target);
-    return variant && variant.d ? variant.d : parts[key];
+    return { key, role, part: variant && variant.d ? variant.d : parts[key], variant, slot: s[role] };
   };
-  const paths = [transform(partFor('L', lead), s.L, preserve),
-                 transform(partFor('V', vowel), s.V, preserve)];
-  if (final) paths.push(transform(partFor('T', final), s.T, preserve));
-  return fixWinding(paths.join(' '));
+  const components = [partFor('L', lead), partFor('V', vowel)];
+  if (final) components.push(partFor('T', final));
+  // The correction hook works only on the already selected, manually colored
+  // variants; the normal composer is kept byte-compatible when no hook is set.
+  if (composer && !preserve) return composer(components, target);
+  return fixWinding(components.map((c) => transform(c.part, c.slot, preserve)).join(' '));
 }
 
 // Every syllable the components on hand can spell.
@@ -202,14 +204,25 @@ function composeSyllable(parts, lead, vowel, final, { preserve = false, variatio
 // writing is *always* short of something, so for the freeform flow that
 // refusal is the normal case, not the edge case. Build what can be built; the
 // caller says what is missing and which syllables would close the gap.
+function appendHangulGlyph(glyphs, parts, opts, i) {
+  const char = String.fromCodePoint(HANGUL_START + i);
+  const { lead, vowel, final } = decomposeSyllable(HANGUL_START + i);
+  if (!parts[componentKey('L', lead)] || !parts[componentKey('V', vowel)]) return;
+  if (final && !parts[componentKey('T', final)]) return;
+  glyphs.push({ char, d: composeSyllable(parts, lead, vowel, final, { ...opts, targetChar: char }), advance: 1000 });
+}
 function buildHangulGlyphs(parts, opts) {
   const glyphs = [];
+  for (let i = 0; i < HANGUL_COUNT; i++) appendHangulGlyph(glyphs, parts, opts, i);
+  return glyphs;
+}
+// Used only when worker startup is blocked and the main thread must build the
+// font. Yield between short batches so ordinary interaction can still render.
+async function buildHangulGlyphsCooperatively(parts, opts, yieldControl) {
+  const glyphs = [];
   for (let i = 0; i < HANGUL_COUNT; i++) {
-    const char = String.fromCodePoint(HANGUL_START + i);
-    const { lead, vowel, final } = decomposeSyllable(HANGUL_START + i);
-    if (!parts[componentKey('L', lead)] || !parts[componentKey('V', vowel)]) continue;
-    if (final && !parts[componentKey('T', final)]) continue;
-    glyphs.push({ char, d: composeSyllable(parts, lead, vowel, final, opts), advance: 1000 });
+    appendHangulGlyph(glyphs, parts, opts, i);
+    if ((i + 1) % 128 === 0) await yieldControl();
   }
   return glyphs;
 }
@@ -240,7 +253,7 @@ function placeAlone(d) {
   return svgpath(d).scale(k, k).translate(x - box.x0 * k, y - box.y0 * k).round(1).toString();
 }
 
-function buildJamoGlyphs(parts) {
+function buildJamoGlyphs(parts, { renderJamo = null } = {}) {
   const vowels = new Set(VOWELS);
   const glyphs = [];
   for (let code = COMPAT_FIRST; code <= COMPAT_LAST; code++) {
@@ -250,10 +263,11 @@ function buildJamoGlyphs(parts) {
     const part = parts[key];
     const d = typeof part === 'string' ? part : (part && part.d);
     if (!d) continue;
-    glyphs.push({ char, d: placeAlone(d), advance: 1000 });
+    const base = placeAlone(d);
+    glyphs.push({ char, d: renderJamo ? renderJamo({ char, key, part: d, base }) : base, advance: 1000 });
   }
   return glyphs;
 }
 
 
-module.exports = { LEADS, VOWELS, FINALS, HANGUL_START, HANGUL_COUNT, componentKey, requiredComponents, extraCharacters, decomposeSyllable, placeComponent, pathBox, slots, composeSyllable, buildHangulGlyphs, buildJamoGlyphs };
+module.exports = { LEADS, VOWELS, FINALS, HANGUL_START, HANGUL_COUNT, componentKey, requiredComponents, extraCharacters, decomposeSyllable, placeComponent, pathBox, slots, transform, composeSyllable, buildHangulGlyphs, buildHangulGlyphsCooperatively, buildJamoGlyphs };

@@ -270,9 +270,12 @@ function Glyph () {
   this.width = 0
 }
 
+// Actual outline bounds are needed for true sidebearings and baseline-aware
+// metrics. Starting these at zero incorrectly includes the origin in every
+// positive-coordinate glyph, even after a design translation.
 Object.defineProperty(Glyph.prototype, 'xMin', {
   get: function () {
-    var xMin = 0
+    var xMin = Infinity
     var hasPoints = false
 
     _.forEach(this.contours, function (contour) {
@@ -292,7 +295,7 @@ Object.defineProperty(Glyph.prototype, 'xMin', {
 
 Object.defineProperty(Glyph.prototype, 'xMax', {
   get: function () {
-    var xMax = 0
+    var xMax = -Infinity
     var hasPoints = false
 
     _.forEach(this.contours, function (contour) {
@@ -312,7 +315,7 @@ Object.defineProperty(Glyph.prototype, 'xMax', {
 
 Object.defineProperty(Glyph.prototype, 'yMin', {
   get: function () {
-    var yMin = 0
+    var yMin = Infinity
     var hasPoints = false
 
     _.forEach(this.contours, function (contour) {
@@ -332,7 +335,7 @@ Object.defineProperty(Glyph.prototype, 'yMin', {
 
 Object.defineProperty(Glyph.prototype, 'yMax', {
   get: function () {
-    var yMax = 0
+    var yMax = -Infinity
     var hasPoints = false
 
     _.forEach(this.contours, function (contour) {

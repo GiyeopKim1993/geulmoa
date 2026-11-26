@@ -51,12 +51,15 @@ function getGlyph (glyphElem, fontInfo) {
 }
 
 function deduplicateGlyps (glyphs, ligatures) {
-  // Result (the list of unique glyphs)
+  // Geulmoa: preserve the first canonical glyph exactly as before, but index
+  // by width and outline rather than scanning every earlier glyph. The old
+  // quadratic scan stalls the fallback UI on a full 11,172-syllable font.
   var result = []
+  var index = new Map()
 
   _.forEach(glyphs, function (glyph) {
-    // Search for glyphs with the same properties (width and d)
-    var canonical = _.find(result, { width: glyph.width, d: glyph.d })
+    var outlines = index.get(glyph.width)
+    var canonical = outlines && outlines.get(glyph.d)
 
     if (canonical) {
       // Add the code points to the unicode array.
@@ -65,6 +68,12 @@ function deduplicateGlyps (glyphs, ligatures) {
       glyph.canonical = canonical
     } else {
       result.push(glyph)
+      // Lodash's original matcher did not match absent properties against an
+      // explicit undefined value. Keep that behavior for unusual SVG fonts.
+      if (Object.prototype.hasOwnProperty.call(glyph, 'width') && Object.prototype.hasOwnProperty.call(glyph, 'd')) {
+        if (!outlines) { outlines = new Map(); index.set(glyph.width, outlines) }
+        outlines.set(glyph.d, glyph)
+      }
     }
   })
 

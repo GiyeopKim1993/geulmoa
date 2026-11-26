@@ -12,10 +12,10 @@ const escAttr = (s) => s.replace(/[&<>"']/g, (c) => `&#x${c.codePointAt(0).toStr
 /**
  * @param {string} name font family name
  * @param {Array<{char:string,d:string,advance:number}>} glyphs
- * @param {{wordSpace?:number}} opts
+ * @param {{wordSpace?:number,ascent?:number,descent?:number,xHeight?:number,capHeight?:number}} opts
  * @returns {Buffer} TTF
  */
-function buildTTF(name, glyphs, { wordSpace = 300 } = {}) {
+function buildTTF(name, glyphs, { wordSpace = 300, ascent = ASCENT, descent = DESCENT, xHeight = XH, capHeight = CAP } = {}) {
   // Keep a stable ASCII PostScript ID even for a Korean-only family name.
   // Different Korean names must not all collapse to the same DrawYourFont ID.
   let hash = 2166136261;
@@ -26,7 +26,7 @@ function buildTTF(name, glyphs, { wordSpace = 300 } = {}) {
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg"><defs>`,
     `<font id="${id}" horiz-adv-x="${wordSpace}">`,
-    `<font-face font-family="${escAttr(name)}" units-per-em="${UPM}" ascent="${ASCENT}" descent="${DESCENT}" x-height="${XH}" cap-height="${CAP}"/>`,
+    `<font-face font-family="${escAttr(name)}" units-per-em="${UPM}" ascent="${ascent}" descent="${descent}" x-height="${xHeight}" cap-height="${capHeight}"/>`,
     `<missing-glyph horiz-adv-x="${Math.round(UPM / 2)}"/>`,
     `<glyph glyph-name="space" unicode="${esc(' ')}" horiz-adv-x="${wordSpace}" d=""/>`,
   ];

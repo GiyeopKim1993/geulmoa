@@ -1,0 +1,50 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { cleanStroke, cleanActions, compatible } = require('../site/stroke-cleanup');
+const { normalizeDesign, applyFontDesign } = require('../src/font-design');
+const { pathBox } = require('../src/hangul');
+const { Glyph } = require('../vendor/svg2ttf/lib/sfnt');
+
+const noisy = Array.from({length:61},(_,i)=>[.15+i*.01,.3+((i%2)?0.003:-0.003)]);
+const saved = JSON.stringify(noisy), cleaned = cleanStroke(noisy,100,'touch');
+assert.equal(JSON.stringify(noisy),saved,'source stroke is not mutated');
+assert.deepEqual(cleaned[0],noisy[0]);assert.deepEqual(cleaned.at(-1),noisy.at(-1));
+const variance = xs => xs.slice(4,-4).reduce((n,p)=>n+(p[1]-.3)**2,0);
+assert(variance(cleaned)<variance(noisy)*.85,'small device wobble should be reduced');
+assert.deepEqual(cleanStroke(noisy,0,'touch'),noisy,'zero cleanup means original');
+assert.deepEqual(cleanStroke([[.2,.2],[.21,.2]],100,'touch'),[[.2,.2],[.21,.2]],'short strokes remain');
+const duplicates=Array.from({length:3000},(_,i)=>i===2999?[.5,.3]:[.1,.3]);
+assert.equal(cleanStroke(duplicates,100,'touch').length,3000,'dense duplicate points remain bounded and intact');
+const angled=[];for(let i=0;i<=20;i++)angled.push([.1+i*.01,.2]);for(let i=1;i<=20;i++)angled.push([.3,.2+i*.01]);
+const corner=cleanStroke(angled,100,'touch');assert.deepEqual(corner[20],angled[20],'intentional right-angle corner remains fixed');
+for(let i=0;i<noisy.length;i++)assert(Math.hypot(cleaned[i][0]-noisy[i][0],cleaned[i][1]-noisy[i][1])<=.0045+1e-10,'movement bounded');
+const pen=cleanStroke(noisy,100,'pen');
+const move = xs => xs.reduce((n,p,i)=>n+Math.hypot(p[0]-noisy[i][0],p[1]-noisy[i][1]),0);
+assert(move(pen)<move(cleaned),'automatic device coefficients are distinguishable');
+const actions=[{kind:'ink',device:'touch',points:noisy},{kind:'paint',role:'L',width:.1,points:[[.2,.2],[.3,.2]]}];
+const after=cleanActions(actions,70,'auto');assert.notEqual(after[0],actions[0]);assert.equal(after[1],actions[1]);assert.equal(JSON.stringify(noisy),saved);
+
+const size=31, ring=new Uint8Array(size*size);
+for(let y=5;y<=25;y++)for(let x=5;x<=25;x++)if(x<=8||x>=22||y<=8||y>=22)ring[y*size+x]=1;
+function analysis(mask) {return {size,inkCount:mask.reduce((a,b)=>a+b),unassigned:0,counts:{L:mask.reduce((a,b)=>a+b)},masks:{L:mask}}}
+assert(compatible(analysis(ring),analysis(ring.slice()),['L']).ok);
+const filled=ring.slice();for(let y=9;y<=21;y++)for(let x=9;x<=21;x++)filled[y*size+x]=1;
+assert(!compatible(analysis(ring),analysis(filled),['L']).ok,'closing a counter must fall back');
+const missing=analysis(ring.slice());missing.unassigned=1;assert(!compatible(analysis(ring),missing,['L']).ok);
+
+assert.deepEqual(normalizeDesign(),{letterSpacing:0,wordSpace:500,verticalOffset:0});
+assert.deepEqual(normalizeDesign({letterSpacing:999,wordSpace:10,verticalOffset:-999}),{letterSpacing:200,wordSpace:200,verticalOffset:-100});
+const glyphs=[{char:'가',advance:1000,d:'M100 100L800 100L800 930L100 930Z'},{char:'.',advance:80,d:'M10 10L30 10L30 30L10 30Z'}];
+const d=applyFontDesign(glyphs,{letterSpacing:100,wordSpace:750,verticalOffset:80});
+assert.equal(d.glyphs[0].advance,1100);assert.equal(d.wordSpace,750);assert.equal(d.ascent,1010);
+assert.equal(d.xHeight,560);assert.equal(d.capHeight,780);
+const lowered=applyFontDesign([{char:',',advance:300,d:'M10 -180L100 -180L100 100L10 100Z'}],{verticalOffset:-100});
+assert.equal(lowered.descent,-280);assert.equal(lowered.xHeight,380);assert.equal(lowered.capHeight,600);
+assert.deepEqual(pathBox(d.glyphs[0].d),{x0:150,y0:180,x1:850,y1:1010});
+assert.equal(glyphs[0].advance,1000,'input glyphs are not mutated');
+const narrow=applyFontDesign(glyphs,{letterSpacing:-100});assert(narrow.glyphs[1].advance>=100&&narrow.spacingClamped===1);
+const fontGlyph=new Glyph();fontGlyph.width=1000;fontGlyph.contours=[{points:[{x:150,y:180},{x:850,y:1010}]}];
+assert.deepEqual([fontGlyph.xMin,fontGlyph.yMin,fontGlyph.xMax,fontGlyph.yMax],[150,180,850,1010],'TTF sidebearings and glyph bounds reflect translated coordinates');
+fontGlyph.contours=[{points:[{x:-200,y:-300},{x:-100,y:-10}]}];
+assert.deepEqual([fontGlyph.xMin,fontGlyph.yMin,fontGlyph.xMax,fontGlyph.yMax],[-200,-300,-100,-10]);
+console.log('device-aware cleanup, corner preservation, mask safeguards and font metrics tests passed');
