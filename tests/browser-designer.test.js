@@ -83,7 +83,8 @@ let browser;
   await setSlider(page, '#design-word', 500);
   const baseline = await build(page, 'designer-test-baseline.ttf');
   const jobs0 = await page.evaluate(() => window.__jobs);
-  assert.deepEqual(jobs0[0].design, { cleanupStrength: 0, device: 'auto', letterSpacing: 0, wordSpace: 500, verticalOffset: 0, vectorCorrection: false });
+  assert.deepEqual(jobs0[0].design, { cleanupStrength: 0, device: 'auto', letterSpacing: 0, wordSpace: 500, verticalOffset: 0,
+    vectorCorrection: false, vectorStrength: 100, vectorTarget: 100 });
   assert.match(await page.locator('#design-sample-status').innerText(), /생성한 내 폰트/);
 
   await setSlider(page, '#design-spacing', 130); await setSlider(page, '#design-word', 750); await setSlider(page, '#design-va', 80);

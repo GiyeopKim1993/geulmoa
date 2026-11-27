@@ -290,9 +290,12 @@ async function opaqueSandbox(browser, downloadsAllowed) {
     await page.waitForTimeout(400); assert.equal(downloads.length,0,'the strict sandbox blocks downloads');
     assert.match(await frame.locator('#download-help').innerText(),/백업 내용을 복사/);
   }
-  await frame.locator('#thickness-details > summary').click();
-  await frame.waitForFunction(()=>document.querySelector('#thickness-status').classList.contains('error'));
-  assert.match(await frame.locator('#thickness-status').innerText(),/내장 화면.*새 탭/);
+  await frame.locator('#stroke-compare').click();
+  await frame.waitForFunction(()=>!document.querySelector('#stroke-compare').disabled,null,{timeout:180000});
+  assert(!await frame.locator('#stroke-status').evaluate(e=>e.classList.contains('error')),await frame.locator('#stroke-status').innerText());
+  assert.match(await frame.locator('#stroke-status').innerText(),/브라우저 호환 모드/);
+  assert.equal(await frame.locator('#stroke-before').innerText(),'가');
+  assert(await frame.locator('#stroke-result').isVisible());
   await frame.locator('.backup-manual summary').click(); await frame.locator('#backup-make-text').click();
   const copied=JSON.parse(await frame.locator('#backup-text').inputValue());
   assert.equal(copied.samples.가.actions.filter(a=>a.kind==='ink').length,2);

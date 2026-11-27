@@ -107,7 +107,7 @@ async function testDesktop(browser) {
   assert.equal(ga.overlap, 0, 'a pixel cannot silently be assigned to multiple roles');
   assert.equal(ga.strokes, 1, 'a continuous real pointer path reaches the actual TTF worker');
   assert(ga.pointCount > 5, 'saved pointer points are sent for vector reconstruction');
-  assert.match(await page.locator('#correction-report-title').innerText(), /자동 보정 결과/);
+  assert.match(await page.locator('#correction-report-title').innerText(), /획 굵기 맞춤 결과/);
   const gak = job.find(s => s.char === '각');
   assert(gak && gak.counts.L > 0 && gak.counts.V > 0 && gak.counts.T > 0 && gak.overlap === 0, 'all three masks reach the worker');
   await page.locator('#inspect-char').fill('가'); assert.match(await page.locator('#inspect-status').innerText(), /직접 쓴 원본/);

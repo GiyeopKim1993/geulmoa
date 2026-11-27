@@ -9,7 +9,10 @@ self.onmessage = async ({ data }) => {
     // Some browsers can start a Worker but cannot draw to a canvas there.
     // Ask the page to use its cooperative DOM-canvas engine before starting
     // the job; do not silently produce an uncorrected font or retry a job.
-    if (data.design?.vectorCorrection !== false && (data.samples || []).some((s) => s.strokes?.length) && !supportsVectorRaster()) {
+    const strength = data.design?.vectorStrength;
+    const correctionActive = data.design?.vectorCorrection !== false &&
+      (strength == null || !Number.isFinite(Number(strength)) || Number(strength) > 0);
+    if (correctionActive && (data.samples || []).some((s) => s.strokes?.length) && !supportsVectorRaster()) {
       self.postMessage({ type: 'compat-required' }); return;
     }
     const out = await buildScreenFont(data.samples || [], data.name,

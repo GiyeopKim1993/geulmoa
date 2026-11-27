@@ -15,6 +15,10 @@ const GRID = 512;
 const THRESHOLD = 100;
 const MIN_RATIO = 0.42, MAX_RATIO = 2.5;
 const MAX_STROKES = 1000, MAX_POINTS = 60000;
+function percent(value, fallback, min, max) {
+  const n = value == null ? NaN : Number(value);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+}
 
 function makeCanvas(width, height) {
   if (typeof OffscreenCanvas === 'function') {
@@ -119,15 +123,18 @@ function aloneMatrix(path) {
 function slotKey(slot) { return `${slot.x},${slot.y},${slot.sx},${slot.sy}`; }
 
 class VectorCorrection {
-  constructor({ enabled = true, traceGray }) {
+  constructor({ enabled = true, traceGray, strength = 100, targetRatio = 100 }) {
     this.enabled = enabled;
-    this.available = enabled && supportsVectorRaster();
+    this.strength = percent(strength, 100, 0, 100) / 100;
+    this.targetRatio = percent(targetRatio, 100, 70, 130) / 100;
+    const needsRaster = enabled && this.strength > 0;
+    this.available = enabled && (!needsRaster || supportsVectorRaster());
     this.traceGray = traceGray;
-    this.target = 0;
+    this.baseTarget = 0; this.target = 0;
     this.records = new Map();
     this.contacts = new Map();
     this.nextSnapshotId = 1;
-    if (this.available) {
+    if (needsRaster && this.available) {
       const surface = makeCanvas(GRID, GRID);
       if (!surface) this.available = false;
       else this.ctx = surface.ctx;
@@ -136,7 +143,7 @@ class VectorCorrection {
   prepare({ strokes: raw, masks, union, size, roles, wholeBox }) {
     const frame = frameFor(wholeBox, { inset: 90 });
     const width = INK_WIDTH * size * frame.scale;
-    if (!this.enabled) return { frame, width, reason: '자동 보정 꺼짐' };
+    if (!this.enabled || !this.strength) return { frame, width, reason: '획 굵기 맞춤 꺼짐' };
     if (!this.available) return { frame, width, reason: '이 브라우저에서 경로 보정을 사용할 수 없음' };
     const strokes = validStrokes(raw);
     if (!strokes) return { frame, width, reason: '저장된 획 경로가 없거나 너무 복잡함' };
@@ -151,9 +158,11 @@ class VectorCorrection {
   }
   setTarget(sources) {
     const widths = sources.filter((s) => s && s.strokes && s.wholeUsable).map((s) => s.width);
-    this.target = widths.length ? Math.max(14, Math.min(150, median(widths))) : 0;
+    this.baseTarget = widths.length ? Math.max(14, Math.min(150, median(widths))) : 0;
+    this.target = this.baseTarget ? Math.max(14, Math.min(150, this.baseTarget * this.targetRatio)) : 0;
     this.targetSamples = widths.length;
   }
+  outputWidth(natural) { return natural + (this.target - natural) * this.strength; }
   reset() {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, GRID, GRID);
@@ -213,16 +222,16 @@ class VectorCorrection {
     return a.components === b.components && a.holes === b.holes && ratio >= 0.4 && ratio <= 2.6;
   }
   original(base, source) {
-    if (!this.enabled) return { d: base, status: 'off', reason: '' };
+    if (!this.enabled || !this.strength) return { d: base, status: 'off', reason: '' };
     if (!this.available) return { d: base, status: 'kept', reason: '이 브라우저에서 경로 보정을 사용할 수 없음' };
     if (!source || !source.strokes || !source.wholeUsable) return { d: base, status: 'kept', reason: source?.reason || '저장된 획 경로 없음' };
     if (!this.target) return { d: base, status: 'kept', reason: '기준 획 굵기를 정할 수 없음' };
-    const ratio = this.target / source.width;
+    const width = this.outputWidth(source.width), ratio = width / source.width;
     if (ratio < MIN_RATIO || ratio > MAX_RATIO) return { d: base, status: 'kept', reason: '필요한 굵기 변화가 너무 큼' };
-    if (Math.abs(source.width - this.target) < 1) return { d: base, status: 'same', reason: '' };
+    if (Math.abs(source.width - width) < 1) return { d: base, status: 'same', reason: '' };
     try {
-      this.drawWhole(source, this.target);
-      const candidate = this.traceCurrent(base, this.target);
+      this.drawWhole(source, width);
+      const candidate = this.traceCurrent(base, width);
       if (!candidate) return { d: base, status: 'kept', reason: '다시 그린 획의 윤곽을 만들지 못함' };
       if (!this.equivalent(this.snapshot(base), this.snapshot(candidate))) return { d: base, status: 'kept', reason: '획 덩어리·구멍 또는 면적이 달라짐' };
       return { d: candidate, status: 'adjusted', reason: '' };
@@ -236,21 +245,21 @@ class VectorCorrection {
     const base = alone ? baseAlone : transform(part, slot, false);
     const record = { base, d: base, status: 'kept', reason: '', before: null, after: null };
     this.records.set(cacheKey, record);
-    if (!this.enabled) { record.status = 'off'; return record; }
+    if (!this.enabled || !this.strength) { record.status = 'off'; return record; }
     if (!this.available) { record.reason = '이 브라우저에서 경로 보정을 사용할 수 없음'; return record; }
     if (!this.target) { record.reason = '기준 획 굵기를 정할 수 없음'; return record; }
     if (!variant) { record.reason = '추정 자모에는 원래 획 경로가 없음'; return record; }
     if (!variant.fit || !variant.fit.usable) { record.reason = variant.sourceReason || '수동 색칠 경계와 획 경로가 맞지 않음'; return record; }
     const matrix = alone ? aloneMatrix(part) : slotFor(part, slot);
     const natural = INK_WIDTH * variant.size * variant.frame.scale * Math.sqrt(matrix.kx * matrix.ky);
-    const ratio = this.target / natural;
+    const width = this.outputWidth(natural), ratio = width / natural;
     if (!Number.isFinite(ratio) || ratio < MIN_RATIO || ratio > MAX_RATIO) { record.reason = '필요한 굵기 변화가 너무 큼'; return record; }
-    if (Math.abs(natural - this.target) < 1 && Math.max(matrix.kx, matrix.ky) / Math.min(matrix.kx, matrix.ky) < 1.04) {
+    if (Math.abs(natural - width) < 1 && Math.max(matrix.kx, matrix.ky) / Math.min(matrix.kx, matrix.ky) < 1.04) {
       record.status = 'same'; return record;
     }
     try {
-      this.drawPart(variant, matrix, this.target);
-      const candidate = this.traceCurrent(base, this.target);
+      this.drawPart(variant, matrix, width);
+      const candidate = this.traceCurrent(base, width);
       if (!candidate) { record.reason = '다시 그린 획의 윤곽을 만들지 못함'; return record; }
       record.before = this.snapshot(base); record.after = this.snapshot(candidate);
       if (!this.equivalent(record.before, record.after)) { record.reason = '획 덩어리·구멍 또는 면적이 달라짐'; record.after = null; return record; }
@@ -283,7 +292,7 @@ class VectorCorrection {
     const baseline = () => fixWinding(records.map((r) => r.base).join(' '));
     const reasons = [...new Set(records.filter((r) => r.reason).map((r) => r.reason))];
     const adjusted = records.some((r) => r.status === 'adjusted');
-    if (!adjusted) return { d: baseline(), status: this.enabled ? (reasons.length ? 'kept' : 'same') : 'off', reasons };
+    if (!adjusted) return { d: baseline(), status: this.enabled && this.strength ? (reasons.length ? 'kept' : 'same') : 'off', reasons };
     try {
       for (let i = 0; i < records.length; i++) for (let j = i + 1; j < records.length; j++) {
         if (this.touching(this.before(records[i]), this.before(records[j])) ||

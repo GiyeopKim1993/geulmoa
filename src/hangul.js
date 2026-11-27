@@ -211,18 +211,26 @@ function appendHangulGlyph(glyphs, parts, opts, i) {
   if (final && !parts[componentKey('T', final)]) return;
   glyphs.push({ char, d: composeSyllable(parts, lead, vowel, final, { ...opts, targetChar: char }), advance: 1000 });
 }
+function* glyphIndices(opts) {
+  if (Array.isArray(opts?.onlySyllables)) {
+    const chosen = [...new Set(opts.onlySyllables.map((ch) => String(ch).codePointAt(0) - HANGUL_START))]
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < HANGUL_COUNT).sort((a, b) => a - b);
+    yield* chosen; return;
+  }
+  for (let i = 0; i < HANGUL_COUNT; i++) yield i;
+}
 function buildHangulGlyphs(parts, opts) {
   const glyphs = [];
-  for (let i = 0; i < HANGUL_COUNT; i++) appendHangulGlyph(glyphs, parts, opts, i);
+  for (const i of glyphIndices(opts)) appendHangulGlyph(glyphs, parts, opts, i);
   return glyphs;
 }
 // Used only when worker startup is blocked and the main thread must build the
 // font. Yield between short batches so ordinary interaction can still render.
 async function buildHangulGlyphsCooperatively(parts, opts, yieldControl) {
-  const glyphs = [];
-  for (let i = 0; i < HANGUL_COUNT; i++) {
+  const glyphs = []; let visited = 0;
+  for (const i of glyphIndices(opts)) {
     appendHangulGlyph(glyphs, parts, opts, i);
-    if ((i + 1) % 128 === 0) await yieldControl();
+    if (++visited % 128 === 0) await yieldControl();
   }
   return glyphs;
 }

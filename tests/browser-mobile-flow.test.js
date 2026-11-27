@@ -30,9 +30,10 @@ async function build(page){
    const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(url,{waitUntil:'domcontentloaded'});
    await noOverflow(page,`${name}/${width} initial`);
    const order=await page.evaluate(()=>[...document.querySelector('main').children].map(e=>e.id||e.className));
-   assert.equal(order[order.length-1],'designer');assert(order.indexOf('preview')<order.indexOf('thickness-test'));assert(order.indexOf('thickness-test')<order.indexOf('designer'));
-   assert(!(await page.locator('#thickness-details').evaluate(e=>e.open)),'optional vector comparison starts closed');
-   assert(await page.locator('#thickness-result').isHidden(),'no expensive comparison started on load');
+   assert.equal(order[order.length-1],'designer');assert(order.indexOf('preview')<order.indexOf('designer'));
+   assert(await page.locator('#preview #stroke-settings').count(),'stroke settings belong to the actual font workflow');
+   assert(await page.locator('#stroke-result').isHidden(),'no comparison starts on load');
+   assert.equal(await page.locator('#thickness-details').count(),0,'the separate experiment is gone');
    if(width<=720){
     assert(await page.locator('.mobile-nav').isVisible());
     await page.locator('#quick-sample-list [data-char="트"]').click();
@@ -51,10 +52,11 @@ async function build(page){
    assert((await page.locator('#backup-text').inputValue()).includes('samples'));
    await noOverflow(page,`${name}/${width} backup open`);
    if(width===320){
-    await page.locator('#thickness-details > summary').click();
-    await page.waitForFunction(()=>!document.querySelector('#thickness-result').hidden||document.querySelector('#thickness-status').classList.contains('error'),null,{timeout:120000});
-    assert(!await page.locator('#thickness-status').evaluate(e=>e.classList.contains('error')),await page.locator('#thickness-status').innerText());
-    await noOverflow(page,`${name}/${width} vector results open`);
+    await page.locator('.stroke-go-build').click(); assert.equal(new URL(page.url()).hash,'#font-export');
+    await page.locator('#stroke-compare').click();
+    assert.match(await page.locator('#stroke-status').innerText(),/한글을 쓰고/);
+    assert(await page.locator('#stroke-result').isHidden());
+    await noOverflow(page,`${name}/${width} empty comparison`);
    }
    if(width===390){
     const lead=[[.18,.2],[.49,.2],[.49,.65]],vowel=[[.7,.16],[.7,.76]];
@@ -64,7 +66,13 @@ async function build(page){
     assert.match(await page.locator('#paint-status').innerText(),/모든 획을 자모별로 나눴어요/);
     assert(await page.locator('.sample-chip.done').filter({hasText:/^가$/}).count());
     await page.locator('#capture-close').click();
-    await page.locator('.mobile-nav a[href="#preview"]').click();await build(page);
+    await page.locator('.mobile-nav a[href="#preview"]').click();
+    await page.locator('#stroke-compare').click();
+    await page.waitForFunction(()=>!document.querySelector('#stroke-compare').disabled,null,{timeout:120000});
+    assert(!await page.locator('#stroke-status').evaluate(e=>e.classList.contains('error')),await page.locator('#stroke-status').innerText());
+    assert.equal(await page.locator('#stroke-before').innerText(),'가');
+    await noOverflow(page,`${name}/${width} actual stroke comparison`);
+    await build(page);
     assert.equal(await page.locator('#font-state').innerText(),'내 손글씨 폰트 적용 중');
     const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('#download-font').click()]);
     const file=path.join(OUT,`${name}-mobile.ttf`);await dl.saveAs(file);assert.deepEqual([...fs.readFileSync(file).subarray(0,4)],[0,1,0,0]);
@@ -84,7 +92,7 @@ async function build(page){
     assert.match(await page.locator('#download-font').innerText(),/^TTF 다운로드/);
     if(name==='chromium'){await page.locator('#designer').screenshot({path:path.join(OUT,'mobile-final-designer.png')});await page.locator('#studio').screenshot({path:path.join(OUT,'mobile-final-studio.png')});}
    }
-   assert.deepEqual(errors,[]);await ctx.close();console.log(`${name} ${width}px: responsive layout and navigation passed${width===390?'; touch draw/color/build/download/design/rebuild passed':''}${width===320?'; optional vector lab passed':''}`);
+   assert.deepEqual(errors,[]);await ctx.close();console.log(`${name} ${width}px: responsive layout and navigation passed${width===390?'; touch draw/color/actual comparison/build/download/design/rebuild passed':''}${width===320?'; empty comparison guidance passed':''}`);
   }
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

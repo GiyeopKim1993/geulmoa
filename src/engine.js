@@ -69,7 +69,8 @@ async function buildScreenFont(samples, name = 'My Hand', progress = () => {}, o
   const originalSources = {};
   const literals = {};
   const incomplete = [];
-  const correction = new VectorCorrection({ enabled: options.vectorCorrection !== false, traceGray });
+  const correction = new VectorCorrection({ enabled: options.vectorCorrection !== false, traceGray,
+    strength: options.vectorStrength, targetRatio: options.vectorTarget });
   let contextCount = 0;
   let reviewed = 0;
 
@@ -137,7 +138,8 @@ async function buildScreenFont(samples, name = 'My Hand', progress = () => {}, o
   correction.setTarget(Object.values(originalSources));
   const counts = () => ({ total: 0, adjusted: 0, partial: 0, kept: 0, same: 0, off: 0 });
   const strokeCorrection = { enabled: correction.enabled, available: correction.available,
-    target: correction.target, referenceCount: correction.targetSamples || 0,
+    strength: correction.strength * 100, targetRatio: correction.targetRatio * 100,
+    baseTarget: correction.baseTarget, target: correction.target, referenceCount: correction.targetSamples || 0,
     original: counts(), composed: counts(), jamo: counts(), reasons: {}, byChar: {}, extrasKept: Object.keys(literals).length };
   function record(kind, char, info, withDetail = true) {
     const status = info.status, reasons = info.reasons || (info.reason ? [info.reason] : []);
@@ -152,11 +154,16 @@ async function buildScreenFont(samples, name = 'My Hand', progress = () => {}, o
     glyph.d = adjusted.d; record('original', char, adjusted);
     if (yieldControl) await yieldControl();
   }
-  const canComposeVectors = correction.enabled && correction.available && correction.target > 0;
-  const defaultInfo = correction.enabled
+  const canComposeVectors = correction.enabled && correction.strength > 0 && correction.available && correction.target > 0;
+  const defaultInfo = correction.enabled && correction.strength > 0
     ? { status: 'kept', reasons: [correction.available ? '기준 획 굵기를 정할 수 없음' : '이 브라우저에서 경로 보정을 사용할 수 없음'] }
     : { status: 'off', reasons: [] };
-  const opts = { preserve: false, variations };
+  // A preview filters only compositions, not samples. Thus the median target,
+  // context selection, direct originals, cleanup and final outlines match the
+  // full downloadable font for each displayed glyph.
+  const onlySyllables = typeof options.previewChars === 'string'
+    ? [...new Set([...options.previewChars.normalize('NFC')].filter((ch) => partsOf(ch)))].slice(0, 64) : null;
+  const opts = { preserve: false, variations, onlySyllables };
   if (canComposeVectors) opts.composer = (components, target) => {
     // A fully handwritten syllable always wins over a composition.
     if (originals[target.char]) return originals[target.char].d;

@@ -8,14 +8,19 @@
   const FINALS = ['', ...'ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ'];
   const KEY = 'geulmoa-drawing-v1';
   // Keep the HTML, main engine and workers on the same deployment version.
-  const WORKER_URL = 'worker.js?v=auto-vector-1', MAIN_ENGINE_URL = 'engine-main.js?v=auto-vector-1';
+  const WORKER_URL = 'worker.js?v=stroke-ui-2', MAIN_ENGINE_URL = 'engine-main.js?v=stroke-ui-2';
   const IMPORT_LIMIT = 8_000_000; // cap untrusted pasted JSON and uploaded files
   const Coloring = window.GeulmoaColoring;
   const Cleanup = window.GeulmoaStrokeCleanup;
   const Designer = window.GeulmoaDesigner;
   const DEFAULT_PREVIEW = '안녕하세요, 반가워요.\n다람쥐 헌 쳇바퀴에 타고파';
   const $ = (id) => document.getElementById(id);
-  const defaultState = () => ({ samples: {}, custom: [], current: BASE[0], fontName: 'My Hand', preview: DEFAULT_PREVIEW, autoStroke: true });
+  const defaultState = () => ({ samples: {}, custom: [], current: BASE[0], fontName: 'My Hand', preview: DEFAULT_PREVIEW,
+    autoStroke: true, strokeStrength: 100, strokeTarget: 100 });
+  function settingPercent(value, fallback, min, max) {
+    const number = value == null ? NaN : Number(value);
+    return Number.isFinite(number) ? Math.round(Math.max(min, Math.min(max, number)) / 10) * 10 : fallback;
+  }
   let state = defaultState();
   let role = 'L';
   let mode = 'draw';
@@ -33,6 +38,7 @@
   let result = null;
   let fontFace = null;
   let downloadURL = null;
+  let comparisonFaces = [], comparisonVersion = 0, comparisonValid = false, comparisonRunning = false;
   // Each step has its own dialog. The one shared canvas is moved between
   // dialogs so handwriting and chronological paint actions stay identical.
   const DIALOG_FOR = { draw: 'modal-write', L: 'modal-lead', V: 'modal-vowel', T: 'modal-final' };
@@ -101,7 +107,10 @@
       const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (!saved || typeof saved !== 'object') return;
       const custom = Array.isArray(saved.custom) ? saved.custom.filter((c) => typeof c === 'string' && [...c].length === 1 && parts(c) && ![...BASE, ...CONTEXT, ...EXTRAS].includes(c)).slice(0, 50) : [];
-      state = { ...defaultState(), ...saved, custom: [...new Set(custom)], samples: normalizeSamples(saved.samples), autoStroke: saved.autoStroke !== false };
+      state = { ...defaultState(), ...saved, custom: [...new Set(custom)], samples: normalizeSamples(saved.samples),
+        autoStroke: saved.autoStroke !== false,
+        strokeStrength: settingPercent(saved.strokeStrength, 100, 0, 100),
+        strokeTarget: settingPercent(saved.strokeTarget, 100, 70, 130) };
       if (!allChars().includes(state.current)) state.current = BASE[0];
       role = nextMissingRole(state.current);
       mode = 'draw';
@@ -133,7 +142,7 @@
   function dirty() {
     revision++;
     if (Designer) Designer.markDirty();
-    if (window.GeulmoaThicknessLab) window.GeulmoaThicknessLab.markDirty();
+    invalidateComparison('필기나 설정이 바뀌었어요. ‘전후 비교하기’를 다시 눌러 주세요.');
     if (result) {
       $('font-state').textContent = '변경 있음 · 다시 생성 필요';
       $('font-state').className = 'status-pill dirty';
@@ -626,7 +635,6 @@
     }
     return { list, transfers, skipped, cleanup };
   }
-  function createVectorSamples() { return createJobSamples(); }
   // Explicitly copy saved drawings from another origin into this experiment.
   // Never replace an existing local drawing, copy names or touch the source.
   function importDrawings(raw) {
@@ -667,38 +675,40 @@
     if (added.length) { dirty(); save(); renderGroups(); renderPad(); }
     return { added, existing, invalid, full };
   }
-  // Read (but never store or send) pasted data from the published origin for
-  // the isolated local vector comparison. Validation matches normal export.
-  function comparisonImport(raw) {
-    if (!raw || !raw.trim()) throw new Error('먼저 공개 사이트에서 복사한 저장 데이터를 붙여 넣어 주세요.');
-    if (raw.length > IMPORT_LIMIT) throw new Error('붙여 넣은 데이터가 너무 커요. 글씨 저장 항목의 값만 복사해 주세요.');
-    let saved;
-    try { saved = JSON.parse(raw); } catch (_) { throw new Error('저장 데이터 형식을 읽지 못했어요. 항목의 Value 전체를 복사해 주세요.'); }
-    if (!saved || !saved.samples || typeof saved.samples !== 'object' || Array.isArray(saved.samples)) throw new Error('글씨 저장 데이터가 아니에요. geulmoa-drawing-v1의 Value를 복사해 주세요.');
-    const chars = [...new Set([...BASE, ...CONTEXT, ...Object.keys(saved.samples)])];
-    const list = [], skipped = [];
-    for (const ch of chars) {
-      if ([...ch].length !== 1 || !parts(ch)) continue;
-      const entry = saved.samples[ch];
-      let entries;
-      if (Array.isArray(entry)) {
-        entries = entry.filter((s) => s && Array.isArray(s.points) && s.points.length).map((s) => ({
-          kind: 'ink', points: s.points, ...(['L', 'V', 'T'].includes(s.role) ? { legacyRole: s.role } : {}),
-        }));
-      } else entries = Array.isArray(entry?.actions) ? entry.actions.filter((s) => s && ['ink', 'paint'].includes(s.kind) && Array.isArray(s.points) && s.points.length) : [];
-      if (!entries.some((s) => s.kind === 'ink')) continue;
-      const rs = rolesFor(ch), a = Coloring.analyzeActions(entries, rs.map((r) => r.id));
-      if (!a.inkCount || a.unassigned || rs.some((r) => !a.counts[r.id])) { skipped.push(ch); continue; }
-      const masks = {};
-      for (const r of rs) masks[r.id] = a.masks[r.id].slice().buffer;
-      list.push({ char: ch, size: Coloring.SIZE, roles: masks,
-        strokes: entries.filter((a) => a.kind === 'ink').map((a) => ({ points: a.points })) });
-    }
-    return { list, skipped };
+  function renderStrokeSettings() {
+    $('auto-stroke').checked = state.autoStroke;
+    $('thickness-strength').value = state.strokeStrength; $('thickness-target').value = state.strokeTarget;
+    $('thickness-strength').disabled = !state.autoStroke;
+    $('thickness-target').disabled = !state.autoStroke || state.strokeStrength === 0;
+    $('thickness-strength-value').value = `${state.strokeStrength}%`;
+    const targetDescription = state.strokeTarget === 100 ? '내 글씨 기준' : state.strokeTarget < 100 ? '더 얇게' : '더 두껍게';
+    $('thickness-target-value').value = `${state.strokeTarget}% · ${targetDescription}`;
+    $('thickness-strength').setAttribute('aria-valuetext', `${state.strokeStrength} 퍼센트${state.strokeStrength === 0 ? ', 맞춤 없음' : ''}`);
+    $('thickness-target').setAttribute('aria-valuetext', `${state.strokeTarget} 퍼센트, ${targetDescription}`);
+    document.querySelector('.stroke-badge').textContent = !state.autoStroke ? '꺼짐' : state.strokeStrength === 0 ? '맞춤 없음' : '켜짐';
+    $('stroke-export-summary').textContent = !state.autoStroke ? '획 굵기 맞춤 꺼짐'
+      : state.strokeStrength === 0 ? '획 굵기 맞춤 없음 · 0%'
+      : `획 굵기 맞춤 · ${state.strokeStrength}% / 기준 ${state.strokeTarget}%`;
   }
-  function setBusy(busy) {
-    building = busy; $('build-font').disabled = busy; $('reset-all').disabled = busy; $('build-progress').hidden = !busy;
-    $('build-font').innerHTML = busy ? '폰트를 만들고 있어요 <span>···</span>' : '내 폰트 만들기 <span>↗</span>';
+  function comparisonStatus(message, error = false) {
+    $('stroke-status').textContent = message; $('stroke-status').classList.toggle('error', error);
+  }
+  function invalidateComparison(message) {
+    comparisonVersion++;
+    if (comparisonValid || comparisonRunning) {
+      comparisonValid = false; $('stroke-result').hidden = true; comparisonStatus(message);
+    }
+  }
+  function setBusy(busy, kind = 'font') {
+    building = busy;
+    $('build-font').disabled = busy; $('stroke-compare').disabled = busy; $('reset-all').disabled = busy;
+    $('build-progress').hidden = !busy || kind !== 'font';
+    $('build-font').innerHTML = busy && kind === 'font' ? '폰트를 만들고 있어요 <span>···</span>' : '내 폰트 만들기 <span>↗</span>';
+    $('stroke-compare').innerHTML = busy && kind === 'compare' ? '비교하고 있어요 <span>···</span>' : '전후 비교하기 <span>↗</span>';
+  }
+  function currentDesign() {
+    return { ...(Designer ? Designer.getSettings() : {}), vectorCorrection: state.autoStroke,
+      vectorStrength: state.strokeStrength, vectorTarget: state.strokeTarget };
   }
   function updateMissingPreview() {
     if (!result) { $('preview-missing').textContent = ''; return; }
@@ -721,8 +731,8 @@
     else { info.textContent = '폰트에 없는 글자예요. 다른 글꼴로 표시됩니다.'; return; }
     const correction = result.correction?.byChar?.[value];
     if (correction) {
-      const labels = { adjusted: '벡터 획 굵기를 보정했어요.', partial: '일부 자모만 벡터 획 굵기를 보정했어요.',
-        kept: '안전을 위해 보정 전 윤곽을 유지했어요.', same: '기준 굵기와 가까워 윤곽을 유지했어요.', off: '벡터 획 보정은 꺼져 있어요.' };
+      const labels = { adjusted: '획 굵기 맞춤을 적용했어요.', partial: '일부 자모만 획 굵기를 맞췄어요.',
+        kept: '안전을 위해 맞춤 전 윤곽을 유지했어요.', same: '기준 굵기와 가까워 윤곽을 유지했어요.', off: '획 굵기 맞춤은 꺼져 있어요.' };
       info.textContent += ` ${labels[correction.status] || ''}${correction.reasons?.length ? ` (${correction.reasons.join(' · ')})` : ''}`;
     }
   }
@@ -731,25 +741,26 @@
     const keptText = $('correction-report-kept'), more = $('correction-report-more'), detail = $('correction-report-detail');
     keptText.textContent = ''; detail.textContent = ''; more.hidden = true;
     if (!report) { title.textContent = '획 보정 상태를 확인할 수 없어요'; text.textContent = '미리보기와 TTF를 확인해 주세요.'; return; }
-    if (!report.enabled) {
-      title.textContent = '벡터 획 보정 꺼짐';
-      text.textContent = '보정 전 윤곽으로 TTF를 만들었어요. 다시 켜고 생성해 비교할 수 있어요.';
+    if (!report.enabled || report.strength === 0) {
+      title.textContent = '획 굵기 맞춤 꺼짐';
+      text.textContent = report.enabled ? '맞추는 정도가 0%여서 맞춤 전 윤곽으로 TTF를 만들었어요.'
+        : '맞춤 전 윤곽으로 TTF를 만들었어요. 다시 켜고 생성해 비교할 수 있어요.';
       return;
     }
     if (!report.available) {
-      title.textContent = '벡터 보정을 사용할 수 없어요';
-      text.textContent = '이 브라우저에서 획 경로를 그리지 못해 보정 전 윤곽으로 만들었어요.';
+      title.textContent = '획 굵기 맞춤을 사용할 수 없어요';
+      text.textContent = '이 브라우저에서 획 경로를 그리지 못해 맞춤 전 윤곽으로 만들었어요.';
       keptText.textContent = '다른 브라우저에서 다시 시도하거나 이대로 결과를 확인해 주세요.'; return;
     }
     if (!report.target) {
-      title.textContent = '벡터 보정을 적용하지 못했어요';
+      title.textContent = '획 굵기 맞춤을 적용하지 못했어요';
       text.textContent = '기준으로 삼을 수 있는 저장된 획 경로가 없어 기존 윤곽을 유지했어요.';
       keptText.textContent = '완료한 한글을 다시 쓰고 수동 색칠한 뒤 폰트를 다시 만들어 보세요.'; return;
     }
     const n = (x) => Number(x || 0).toLocaleString('ko-KR');
     const o = report.original, c = report.composed, j = report.jamo;
-    title.textContent = '벡터 획 굵기 자동 보정 결과';
-    text.textContent = `직접 쓴 음절 ${n(o.adjusted)}자, 조합 음절 ${n(c.adjusted + c.partial)}자에 적용했어요${c.partial ? ` (그중 ${n(c.partial)}자는 일부 자모만 보정)` : ''}. 독립 자모 ${n(j.adjusted)}자에도 적용했어요.`;
+    title.textContent = '획 굵기 맞춤 결과';
+    text.textContent = `맞추는 정도 ${n(report.strength)}% · 기준 굵기 ${n(report.targetRatio)}%. 직접 쓴 음절 ${n(o.adjusted)}자, 조합 음절 ${n(c.adjusted + c.partial)}자에 적용했어요${c.partial ? ` (그중 ${n(c.partial)}자는 일부 자모만 맞춤)` : ''}. 독립 자모 ${n(j.adjusted)}자에도 적용했어요.`;
     const reasons = Object.keys(report.reasons || {});
     const kept = o.kept + c.kept, same = o.same + c.same;
     keptText.textContent = `보정 전 음절 윤곽 유지 ${n(kept)}자${same ? ` · 기준과 가까워 유지 ${n(same)}자` : ''}`;
@@ -798,7 +809,7 @@
   function canvasCompatibilityError() {
     const error = new Error('작업자에서 획 경로를 그릴 수 없어요.'); error.vectorCompat = true; return error;
   }
-  function runFontWorker(url, job, name, design) {
+  function runFontWorker(url, job, name, design, onProgress) {
     return new Promise((resolve, reject) => {
       let active, finished = false, sawProgress = false, timer;
       function settle(error, data) {
@@ -823,7 +834,7 @@
         : startupError('작업자의 결과를 읽지 못했어요.'));
       active.onmessage = ({ data }) => {
         if (!data || typeof data !== 'object') { settle(new Error('작업자가 알 수 없는 결과를 보냈어요.')); return; }
-        if (data.type === 'progress') { sawProgress = true; clearTimeout(timer); $('build-status').textContent = data.message; return; }
+        if (data.type === 'progress') { sawProgress = true; clearTimeout(timer); onProgress(data.message); return; }
         if (data.type === 'compat-required' && !sawProgress) { settle(canvasCompatibilityError()); return; }
         if (data.type === 'error') { settle(new Error(data.message || '글꼴 생성 중 오류가 발생했어요.')); return; }
         if (data.type === 'done') settle(null, data);
@@ -857,42 +868,113 @@
       return URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
     } finally { clearTimeout(timer); }
   }
-  async function runFontJob(job, name, design) {
+  async function runFontJob(job, name, design, onProgress = (message) => { $('build-status').textContent = message; }) {
     // Sandboxed frames have an opaque origin even when location.origin looks
     // normal. Their Worker and fetch attempts are commonly blocked by the
     // browser itself, so avoid the doomed requests and their noisy errors.
     const opaqueOrigin = typeof self.origin === 'string' && self.origin === 'null';
     if (!opaqueOrigin) {
       let needsCanvasFallback = false;
-      try { return { data: await runFontWorker(WORKER_URL, job, name, design), mode: 'worker' }; }
+      try { return { data: await runFontWorker(WORKER_URL, job, name, design, onProgress), mode: 'worker' }; }
       catch (error) {
         if (error.vectorCompat) needsCanvasFallback = true;
         else if (!error.workerStartup) throw error;
       }
       if (!needsCanvasFallback) {
-        $('build-status').textContent = '작업자 연결을 다시 시도하고 있어요. 작성한 글씨는 그대로입니다.';
+        onProgress('작업자 연결을 다시 시도하고 있어요. 작성한 글씨는 그대로입니다.');
         if (typeof Worker === 'function') {
           let blobUrl;
           try {
             blobUrl = await workerBlobUrl();
-            return { data: await runFontWorker(blobUrl, job, name, design), mode: 'blob' };
+            return { data: await runFontWorker(blobUrl, job, name, design, onProgress), mode: 'blob' };
           } catch (error) { if (blobUrl && !error.workerStartup && !error.vectorCompat) throw error; }
           finally { if (blobUrl) URL.revokeObjectURL(blobUrl); }
         }
       }
     }
-    $('build-status').textContent = '브라우저 호환 모드로 만들고 있어요. 마지막 단계에서 화면이 수 초 이상 멈출 수 있어요.';
+    onProgress('브라우저 호환 모드로 만들고 있어요. 마지막 단계에서 화면이 수 초 이상 멈출 수 있어요.');
     await new Promise((resolve) => setTimeout(resolve, 20));
     const engine = await loadMainEngine();
     const data = await engine.buildScreenFont(job.list, name,
-      (message) => { $('build-status').textContent = `호환 모드 · ${message}${message.startsWith('TTF') ? ' · 화면이 수 초 이상 멈출 수 있어요.' : ''}`; },
+      (message) => onProgress(`호환 모드 · ${message}${message.startsWith('TTF') ? ' · 화면이 수 초 이상 멈출 수 있어요.' : ''}`),
       { ...design, cooperative: true });
     return { data, mode: 'compat' };
+  }
+  async function compareStroke() {
+    if (building) return;
+    const name = commitFontName(), design = currentDesign(), job = createJobSamples(design);
+    const completed = job.list.filter((sample) => parts(sample.char));
+    if (!completed.length) {
+      comparisonStatus(job.skipped.length
+        ? '먼저 한글을 쓰고 초성·중성·종성 색칠을 모두 마쳐 주세요. 완료한 글자만 비교해요.'
+        : '먼저 한글을 쓰고 자모 색칠을 마쳐 주세요. 완성한 내 글씨로 비교할 수 있어요.', true);
+      return;
+    }
+    const input = [...$('stroke-requested').value.normalize('NFC')].filter((ch) => !/\s/u.test(ch));
+    if (input.some((ch) => !parts(ch))) {
+      comparisonStatus('비교할 글자는 한글 음절만 입력해 주세요. 숫자와 기호는 폰트에서 원래 윤곽을 유지해요.', true); return;
+    }
+    const requested = [...new Set(input.length ? input : completed.map((sample) => sample.char).slice(0, 6))];
+    if (requested.length > 20) { comparisonStatus('서로 다른 한글 음절을 20자 이내로 입력해 주세요.', true); return; }
+    const token = ++comparisonVersion, previewDesign = { ...design, previewChars: requested.join('') };
+    const stillCurrent = () => token === comparisonVersion;
+    const progress = (phase) => (message) => { if (stillCurrent()) comparisonStatus(`${phase} · ${message}`); };
+    comparisonValid = false; comparisonRunning = true; $('stroke-result').hidden = true;
+    setBusy(true, 'compare'); comparisonStatus('맞춤 전 글자를 준비하고 있어요.');
+    try {
+      // The same samples, cleanup, metrics, composer and safety checks are used
+      // by export. Only the set of generated syllables is limited for speed.
+      const before = await runFontJob(job, name, { ...previewDesign, vectorCorrection: false }, progress('맞춤 전'));
+      if (!stillCurrent()) return;
+      const after = await runFontJob(job, name, previewDesign, progress('현재 설정'));
+      if (!stillCurrent()) return;
+      const beforeChars = new Set(before.data.chars), afterChars = new Set(after.data.chars);
+      const shown = requested.filter((ch) => beforeChars.has(ch) && afterChars.has(ch));
+      const missing = requested.filter((ch) => !shown.includes(ch));
+      if (!shown.length) {
+        comparisonStatus(`입력한 글자를 아직 만들 수 없어요: ${missing.join(' ')}. 필요한 자모를 더 쓰고 색칠해 주세요.`, true); return;
+      }
+      const suffix = `${Date.now()}_${token}`, families = [`GeulmoaStrokeBefore${suffix}`, `GeulmoaStrokeAfter${suffix}`];
+      const faces = await Promise.all([new FontFace(families[0], before.data.ttf).load(), new FontFace(families[1], after.data.ttf).load()]);
+      if (!stillCurrent()) return;
+      faces.forEach((face) => document.fonts.add(face));
+      comparisonFaces.forEach((face) => document.fonts.delete(face)); comparisonFaces = faces;
+      const text = shown.join(' ');
+      for (const [id, family] of [['stroke-before', families[0]], ['stroke-small-before', families[0]],
+        ['stroke-after', families[1]], ['stroke-small-after', families[1]]]) {
+        $(id).style.fontFamily = `"${family}", sans-serif`; $(id).textContent = text;
+      }
+      const report = after.data.strokeCorrection, counts = { adjusted: 0, partial: 0, kept: 0, same: 0, off: 0 };
+      const labels = { adjusted: '맞춤 적용', partial: '일부 자모만 맞춤', kept: '맞춤 전 윤곽 유지',
+        same: '기존 윤곽 유지 · 기준과 비슷함', off: '맞춤 꺼짐' };
+      const list = $('stroke-glyph-status'); list.replaceChildren();
+      for (const ch of shown) {
+        const info = report?.byChar?.[ch];
+        if (info && Object.prototype.hasOwnProperty.call(counts, info.status)) counts[info.status]++;
+        const item = document.createElement('li');
+        item.textContent = `${ch}: ${info ? labels[info.status] || '상태 확인 불가' : '상태 확인 불가'}${info?.reasons?.length ? ` (${info.reasons.join(' · ')})` : ''}`;
+        list.append(item);
+      }
+      let summary;
+      if (!report?.enabled || report.strength === 0) summary = '획 굵기 맞춤이 꺼져 있어 두 모습이 같아요.';
+      else if (!report.available) summary = '이 브라우저에서 획 경로를 그릴 수 없어 맞춤 전 윤곽을 유지했어요.';
+      else if (!report.target) summary = '기준으로 삼을 수 있는 획 경로가 없어 맞춤 전 윤곽을 유지했어요.';
+      else summary = `맞춤 적용 ${counts.adjusted}자 · 일부 적용 ${counts.partial}자 · 기존 윤곽 유지 ${counts.kept + counts.same}자. 안전검사에 따라 두 모습이 같을 수 있어요.`;
+      $('stroke-result-summary').textContent = summary;
+      $('stroke-result').hidden = false; comparisonValid = true;
+      const notes = [`${shown.length}자를 현재 설정으로 비교했어요`];
+      if (missing.length) notes.push(`아직 만들 수 없어 표시하지 않은 글자: ${missing.join(' ')}`);
+      if (job.skipped.length) notes.push(`색칠이 끝나지 않아 제외: ${job.skipped.slice(0, 10).join(' ')}${job.skipped.length > 10 ? ' …' : ''}`);
+      if (before.mode === 'compat' || after.mode === 'compat') notes.push('브라우저 호환 모드 사용');
+      comparisonStatus(notes.join(' · ') + '. 설정을 바꾸면 다시 비교해 주세요.');
+    } catch (error) {
+      if (stillCurrent()) comparisonStatus(`비교하지 못했어요: ${String(error?.message || '알 수 없는 오류').slice(0, 180)}. 필기는 그대로예요.`, true);
+    } finally { comparisonRunning = false; setBusy(false); }
   }
   async function build() {
     if (building) return;
     const name = commitFontName();
-    const design = { ...(Designer ? Designer.getSettings() : {}), vectorCorrection: state.autoStroke };
+    const design = currentDesign();
     const job = createJobSamples(design);
     if (!job.list.length) {
       $('build-status').textContent = job.skipped.length ? '글자를 쓴 뒤 초성·중성·종성을 모두 색칠해 주세요. 색칠을 완료한 글자만 폰트에 사용돼요.' : '먼저 위에서 글자를 하나 이상 써 주세요.'; $('build-status').classList.add('error');
@@ -1006,6 +1088,10 @@
       if (!confirm('이 기기에 저장된 모든 필기를 지울까요? 되돌릴 수 없어요.')) return;
       if (worker) { worker.terminate(); worker = null; setBusy(false); }
       state = defaultState(); role = 'L'; mode = 'draw'; paintTool = 'paint'; analysisCache.clear(); revision++; result = null;
+      invalidateComparison('필기를 초기화했어요. 새 글씨를 완성한 뒤 비교해 주세요.');
+      comparisonFaces.forEach((face) => document.fonts.delete(face)); comparisonFaces = [];
+      $('stroke-result').hidden = true; $('stroke-requested').value = ''; renderStrokeSettings();
+      comparisonStatus('필기를 초기화했어요. 새 글씨를 완성한 뒤 비교해 주세요.');
       if (fontFace) document.fonts.delete(fontFace); fontFace = null;
       if (downloadURL) URL.revokeObjectURL(downloadURL); downloadURL = null;
       $('preview-text').style.fontFamily = ''; $('font-state').className = 'status-pill'; $('font-state').textContent = '생성 전 · 시스템 글꼴';
@@ -1081,14 +1167,25 @@
     $('inspect-add').addEventListener('click', () => {
       if (!addCustom($('inspect-char').value, true)) $('inspect-status').textContent = '한글 음절 한 글자를 입력해 주세요.';
     });
-    $('auto-stroke').addEventListener('change', (event) => { state.autoStroke = event.currentTarget.checked; dirty(); save(); });
+    $('auto-stroke').addEventListener('change', (event) => {
+      state.autoStroke = event.currentTarget.checked; renderStrokeSettings(); dirty(); save();
+    });
+    for (const [id, key, min, max] of [['thickness-strength', 'strokeStrength', 0, 100], ['thickness-target', 'strokeTarget', 70, 130]]) {
+      $(id).addEventListener('input', (event) => {
+        const next = settingPercent(event.currentTarget.value, 100, min, max);
+        if (state[key] === next) return;
+        state[key] = next; renderStrokeSettings(); dirty(); save();
+      });
+    }
+    $('stroke-requested').addEventListener('input', () => invalidateComparison('비교할 글자가 바뀌었어요. ‘전후 비교하기’를 다시 눌러 주세요.'));
+    $('stroke-compare').addEventListener('click', compareStroke);
     $('build-font').addEventListener('click', build);
   }
   readState();
   probeStorage();
   $('font-name').value = state.fontName || 'My Hand';
   $('designer-font-name').value = state.fontName || 'My Hand';
-  $('auto-stroke').checked = state.autoStroke;
+  renderStrokeSettings();
   if (typeof state.preview === 'string') $('preview-text').value = state.preview;
   wire(); renderGroups(); renderPad(); updateInspector();
   if (Designer) Designer.init({
@@ -1098,7 +1195,6 @@
       Designer.switchProfile(name); save();
     },
   });
-  if (window.GeulmoaThicknessLab) window.GeulmoaThicknessLab.init({ getLocal: createVectorSamples, parseImported: comparisonImport });
   if (migrated) {
     $('landing-state').textContent = '이전에 쓴 글씨와 색 지정도 보존했어요. 다시 열어 고칠 수 있어요.';
     save();

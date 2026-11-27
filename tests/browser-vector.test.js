@@ -1,224 +1,232 @@
 'use strict';
-// Run the isolated designer server on :4176, then npm run test:vector.
+// User-facing vector settings and before/after use the actual TTF pipeline.
+// Synthetic data tests behavior, not visual quality on real devices.
 const assert = require('node:assert/strict');
-const { chromium } = require('playwright');
-const { buildScreenFont } = require('../src/engine');
-const { topology } = require('../src/topology');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { chromium, firefox, webkit } = require('playwright');
+const browserName = process.env.TEST_BROWSER || 'chromium';
+const browserType = { chromium, firefox, webkit }[browserName];
+if (!browserType) throw new Error(`Unknown TEST_BROWSER: ${browserName}`);
 const url = process.env.APP_URL || 'http://127.0.0.1:4176/';
-
-async function ready(page) {
-  // The optional comparison no longer starts a memory-heavy worker on page load.
-  await page.locator('#thickness-details').evaluate((element) => { if (!element.open) element.open = true; });
-  await page.waitForFunction(() => !document.querySelector('#thickness-result').hidden || document.querySelector('#thickness-status').classList.contains('error'), null, {timeout:90000});
-  const error = await page.locator('#thickness-status').getAttribute('class');
-  assert(!error.includes('error'), await page.locator('#thickness-status').innerText());
-}
-async function setSlider(page, id, value) {
-  await page.locator(id).evaluate((el, value)=>{el.value=String(value);el.dispatchEvent(new Event('input',{bubbles:true}));},value);
-}
-async function alphaSums(page, chars) {
-  return page.evaluate((characters) => {
-    const before=document.querySelector('#thickness-before').style.fontFamily, after=document.querySelector('#thickness-after').style.fontFamily;
-    const c=document.createElement('canvas');c.width=c.height=280;const ctx=c.getContext('2d',{willReadFrequently:true});
-    function draw(ch,fam) {ctx.clearRect(0,0,280,280);ctx.font=`200px ${fam}`;ctx.textBaseline='alphabetic';ctx.fillStyle='#000';ctx.fillText(ch,20,225);const d=ctx.getImageData(0,0,280,280).data;const a=new Uint8Array(280*280);let sum=0;for(let i=0;i<a.length;i++){a[i]=d[4*i+3];sum+=a[i]}return {a,sum}}
-    return characters.map(ch=>{const a=draw(ch,before),b=draw(ch,after);let different=0;for(let i=0;i<a.a.length;i++) if(a.a[i]!==b.a[i])different++;return {char:ch,before:a.sum,after:b.sum,different}});
-  },chars);
-}
-async function assertCounters(page) {
-  const chars=['성','공','강','궁'];
-  const masks=await page.evaluate(chars=>{
-    const fs=[document.querySelector('#thickness-before').style.fontFamily,document.querySelector('#thickness-after').style.fontFamily];
-    const c=document.createElement('canvas');c.width=c.height=280;const x=c.getContext('2d',{willReadFrequently:true});
-    return chars.map(ch=>fs.map(f=>{x.clearRect(0,0,280,280);x.font=`200px ${f}`;x.textBaseline='alphabetic';x.fillText(ch,20,225);const d=x.getImageData(0,0,280,280).data;let a=[];for(let i=0;i<280*280;i++)a.push(d[4*i+3]>=128?1:0);return a}));
-  },chars);
-  for(let i=0;i<chars.length;i++){
-    const a=topology(Uint8Array.from(masks[i][0]),280,280),b=topology(Uint8Array.from(masks[i][1]),280,280);
-    assert(a.holes>=1,`${chars[i]} has an ㅇ counter`);assert.deepEqual(a,b,`${chars[i]} retains its counter and disconnected parts in this example`);
+const out = process.env.STROKE_TEST_DIR || path.join(os.tmpdir(), `geulmoa-stroke-settings-${browserName}`);
+fs.mkdirSync(out, { recursive: true });
+const workerSource = fs.readFileSync(path.join(__dirname, '../site/worker.js'), 'utf8');
+function lines(ch, left, right, y1, y2) {
+  const ink = [], paint = [];
+  for (const [role, y] of [['L', y1], ['V', y2]]) {
+    const points = [[left, y], [right, y]];
+    ink.push({ kind: 'ink', points }); paint.push({ kind: 'paint', role, width: .12, points });
   }
+  return [ch, { version: 2, actions: [...ink, ...paint] }];
 }
-function stateFixture() {
-  function make(char, roles) {
-    const strokes=Object.entries(roles).flatMap(([role,ps])=>ps.map(points=>({role,points})));
-    return [char,{version:2,actions:[...strokes.map(({points})=>({kind:'ink',points})),...strokes.map(({role,points})=>({kind:'paint',role,points,width:.12}))]}];
-  }
-  const samples=Object.fromEntries([
-    make('가',{L:[[[.14,.24],[.44,.24],[.44,.68]]],V:[[[.69,.15],[.69,.78]],[[.69,.46],[.82,.46]]]}),
-    make('각',{L:[[[.23,.19],[.48,.19],[.48,.49]]],V:[[[.69,.14],[.69,.52]],[[.69,.37],[.78,.37]]],T:[[[.23,.72],[.73,.72],[.73,.84]]]})
-  ]);
-  samples['국']={version:2,actions:[{kind:'ink',points:[[.3,.2],[.6,.2],[.6,.4]]}]};
-  return {samples,custom:['국'],current:'가',fontName:'Mine',preview:'가 각'};
-}
-async function stroke(page, points) {
-  const pad=page.locator('#pad');await pad.scrollIntoViewIfNeeded();const b=await pad.boundingBox();
-  const pos=([x,y])=>[b.x+b.width*x,b.y+b.height*y];await page.mouse.move(...pos(points[0]));await page.mouse.down();
-  for(const p of points.slice(1)) await page.mouse.move(...pos(p),{steps:10});await page.mouse.up();
-}
-
-// Deliberately divide one continuous line by color, both along its length and
-// across its width. The latter cannot be faithfully recovered from the line's
-// center and must be kept as the original outline instead of guessing a role.
-async function runSplitProbe(page, acrossWidth) {
-  return page.evaluate(async (acrossWidth)=>{
-    const size=256,c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d',{willReadFrequently:true});
-    const points=[[.20,.5],[.80,.5]];window.GeulmoaColoring.drawPath(ctx,points,size,.03,'#000');
-    const rgba=ctx.getImageData(0,0,size,size).data,L=new Uint8Array(size*size),V=new Uint8Array(size*size);
-    for(let y=0;y<size;y++)for(let x=0;x<size;x++){const p=y*size+x;if(rgba[4*p+3]>=100){if(acrossWidth?y<128:x<128)L[p]=1;else V[p]=1}}
-    const w=new Worker('vector-worker.js');return await new Promise((resolve,reject)=>{
-      w.onmessage=({data})=>{if(data.type==='done'){w.terminate();resolve(data.stats)}if(data.type==='error'){w.terminate();reject(new Error(data.message))}};
-      w.onerror=e=>{w.terminate();reject(new Error(e.message))};
-      w.postMessage({samples:[{char:'가',size,roles:{L:L.buffer,V:V.buffer},strokes:[{points}]}],strength:1,targetRatio:1,requested:'갸'});
-    });
-  },acrossWidth);
-}
-async function runWidthProbe(page) {
-  return page.evaluate(async () => {
-    const size=256;
-    function sample(char, left, right, y1, y2) {
-      const c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d',{willReadFrequently:true}),roles={},strokes=[];
-      for(const [role,y] of [['L',y1],['V',y2]]){
-        const points=[[left,y],[right,y]];ctx.clearRect(0,0,size,size);window.GeulmoaColoring.drawPath(ctx,points,size,.03,'#000');
-        const rgba=ctx.getImageData(0,0,size,size).data,mask=new Uint8Array(size*size);
-        for(let i=0;i<mask.length;i++)if(rgba[4*i+3]>=100)mask[i]=1;
-        roles[role]=mask.buffer;strokes.push({points});
-      }
-      return {char,size,roles,strokes};
-    }
-    const samples=[sample('가',.35,.65,.38,.62),sample('고',.15,.85,.28,.72)],w=new Worker('vector-worker.js');
-    const data=await new Promise((resolve,reject)=>{w.onmessage=({data})=>{if(data.type==='done'){w.terminate();resolve(data)}if(data.type==='error'){w.terminate();reject(new Error(data.message))}};
-      w.onerror=e=>{w.terminate();reject(new Error(e.message))};w.postMessage({samples,strength:1,targetRatio:1,requested:''});});
-    const faces=await Promise.all([new FontFace('ProbeBefore',data.before).load(),new FontFace('ProbeAfter',data.after).load()]);faces.forEach(f=>document.fonts.add(f));
-    const canvas=document.createElement('canvas');canvas.width=720;canvas.height=720;const ctx=canvas.getContext('2d',{willReadFrequently:true});
-    function runs(char,family){ctx.clearRect(0,0,720,720);ctx.font=`640px ${family}`;ctx.textBaseline='alphabetic';ctx.fillText(char,20,640);
-      const pix=ctx.getImageData(340,0,1,720).data, result=[];let n=0;for(let y=0;y<720;y++){if(pix[4*y+3]>=128)n++;else if(n){result.push(n);n=0}}if(n)result.push(n);return result;}
-    const before=[runs('가','ProbeBefore'),runs('고','ProbeBefore')],after=[runs('가','ProbeAfter'),runs('고','ProbeAfter')];faces.forEach(f=>document.fonts.delete(f));
-    return {target:data.target,before,after};
-  });
-}
-async function runMergeWarningProbe(page) {
-  return page.evaluate(async () => {
-    const size=256;
-    function sample(char, lines) {
-      const c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d',{willReadFrequently:true}),roles={},strokes=[];
-      for(const [role,points] of Object.entries(lines)){
-        ctx.clearRect(0,0,size,size);window.GeulmoaColoring.drawPath(ctx,points,size,.03,'#000');
-        const rgba=ctx.getImageData(0,0,size,size).data,mask=new Uint8Array(size*size);
-        for(let i=0;i<mask.length;i++)if(rgba[i*4+3]>=100)mask[i]=1;
-        roles[role]=mask.buffer;strokes.push({points});
-      }
-      return {char,size,roles,strokes};
-    }
-    const samples=[sample('가',{L:[[.2,.48],[.8,.48]],V:[[.2,.53],[.8,.53]]}),
-      sample('고',{L:[[.46,.46],[.54,.46]],V:[[.46,.54],[.54,.54]]})];
-    const w=new Worker('vector-worker.js');return await new Promise((resolve,reject)=>{
-      w.onmessage=({data})=>{if(data.type==='done'){w.terminate();resolve(data.stats)}if(data.type==='error'){w.terminate();reject(new Error(data.message))}};
-      w.onerror=e=>{w.terminate();reject(new Error(e.message))};w.postMessage({samples,strength:1,targetRatio:1.3,requested:''});
-    });
-  });
-}
-let browser;
-(async()=>{
-  browser=await chromium.launch({headless:true,args:['--no-sandbox']});
-  const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
-  await page.addInitScript(()=>{
-    const post=Worker.prototype.postMessage;
-    Worker.prototype.postMessage=function(message,transfer){
-      if(typeof message.targetRatio==='number'){
-        window.__vectorJob=message;
-        this.addEventListener('message',({data})=>{if(data.type==='done')window.__vectorResult={target:data.target,stats:data.stats}});
-      }
-      return post.call(this,message,transfer);
+const basic = Object.fromEntries([lines('가', .35, .65, .38, .62), lines('고', .15, .85, .28, .72)]);
+basic['0'] = { version: 2, actions: [{ kind: 'ink', points: [[.4,.2],[.2,.4],[.4,.8],[.7,.4],[.4,.2]] }] };
+const risk = Object.fromEntries([lines('가', .2, .8, .48, .53), lines('고', .42, .58, .46, .54)]);
+function saved(samples) { return { samples, custom: [], current: '가', fontName: 'Stroke UI QA', preview: '가 고 갸 0' }; }
+async function seed(page, state, mode = 'normal') {
+  await page.addInitScript(({ state, mode }) => {
+    localStorage.setItem('geulmoa-drawing-v1', JSON.stringify(state));
+    window.__strokeJobs = []; window.__strokeOutputs = []; window.__slowPreview = false;
+    const NativeWorker = window.Worker;
+    if (mode === 'no-path2d') { window.Worker = undefined; window.Path2D = undefined; return; }
+    window.Worker = function(source, options) {
+      const w = new NativeWorker(source, options), send = w.postMessage.bind(w);
+      w.postMessage = (message, transfer) => {
+        const design = { ...message.design };
+        window.__strokeJobs.push({ design, samples: message.samples.map(s => ({ char: s.char, strokes: s.strokes })) });
+        w.addEventListener('message', ({ data }) => {
+          if (data.type === 'done') window.__strokeOutputs.push({ design, ttf: Array.from(new Uint8Array(data.ttf)), report: data.strokeCorrection });
+        });
+        if (window.__slowPreview && design.previewChars) { setTimeout(() => send(message, transfer), 350); return; }
+        return send(message, transfer);
+      };
+      return w;
     };
-  });
-  const start=Date.now();await page.goto(url,{waitUntil:'domcontentloaded'});await ready(page);
-  const demoMs=Date.now()-start;
-  assert.equal(await page.locator('.lab-glyph[data-kind="original"]').count(),6);
-  assert.equal(await page.locator('.lab-glyph[data-kind="composed"]').count(),10);
-  assert.equal(await page.locator('.lab-glyph[data-kind="original"][data-adjusted="true"]').count(),6);
-  assert.equal(await page.locator('.lab-glyph[data-char="구"]').getAttribute('data-fallback'),'false');
-  assert.equal(await page.locator('.lab-glyph[data-char="갸"]').getAttribute('data-fallback'),'true');
-  const info=await page.evaluate(()=>window.__vectorResult);
-  for(const g of info.stats)for(const s of g.steps)if(s.method==='vector')assert(Math.abs(s.after-info.target)<1e-7,`fixed target for ${g.char} ${s.role}`);
-  const measurements=await alphaSums(page,['가','각','곡']);
-  assert(measurements[0].after<measurements[0].before,'small original becomes thinner');
-  assert(measurements[1].after>measurements[1].before,'large original becomes thicker');
-  assert(measurements[2].different>0,'composed glyph actually uses adjusted path');
-  await assertCounters(page);
-  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#thickness-download-after').click()]);
-  assert.equal(download.suggestedFilename(),'geulmoa-path-after.ttf');
-  const fs=require('node:fs'),bytes=fs.readFileSync(await download.path());assert.deepEqual([...bytes.slice(0,4)],[0,1,0,0]);
+  }, { state, mode });
+}
+async function slider(page, id, value) {
+  await page.locator(id).evaluate((e, value) => { e.value = String(value); e.dispatchEvent(new Event('input', { bubbles: true })); }, value);
+}
+async function compare(page, prefix, expectWorker = true) {
+  const start = await page.evaluate(() => window.__strokeOutputs.length);
+  await page.locator('#stroke-compare').click();
+  await page.waitForFunction(() => !document.querySelector('#stroke-compare').disabled, null, { timeout: 120000 });
+  const status = await page.locator('#stroke-status').innerText();
+  assert(!await page.locator('#stroke-status').evaluate(e => e.classList.contains('error')), status);
+  assert(await page.locator('#stroke-result').isVisible(), status);
+  if (!expectWorker) return null;
+  const outputs = (await page.evaluate(() => window.__strokeOutputs)).slice(start);
+  assert.equal(outputs.length, 2, `two actual-engine preview jobs: ${JSON.stringify(outputs.map(x => x.design))}`);
+  assert.equal(outputs[0].design.vectorCorrection, false);
+  assert.equal(typeof outputs[0].design.previewChars, 'string');
+  const files = outputs.map((x, i) => { const file = path.join(out, `${prefix}-${i ? 'after' : 'before'}.ttf`); fs.writeFileSync(file, Buffer.from(x.ttf)); return file; });
+  return { before: files[0], after: files[1], outputs };
+}
+async function build(page, name) {
+  await page.locator('#build-font').click();
+  await page.waitForFunction(() => !document.querySelector('#build-font').disabled &&
+    (!document.querySelector('#download-font').hidden || document.querySelector('#build-status').classList.contains('error')), null, { timeout: 120000 });
+  const status = await page.locator('#build-status').innerText();
+  assert(!await page.locator('#build-status').evaluate(e => e.classList.contains('error')), status);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('#download-font').click()]);
+  const file = path.join(out, name); await dl.saveAs(file);
+  assert.deepEqual([...fs.readFileSync(file).subarray(0, 4)], [0, 1, 0, 0]); return file;
+}
+function verify(files, body) {
+  const script = `from fontTools.ttLib import TTFont\nimport sys\nfonts=[TTFont(p) for p in sys.argv[1:]]\ndef shape(f,c):\n g=f.getBestCmap()[ord(c)]; v=f['glyf'][g]; coords,ends,flags=v.getCoordinates(f['glyf'])\n return (tuple(coords),tuple(ends),tuple(flags),f['hmtx'][g])\n${body}\nprint('fontTools: actual preview and downloaded TTF outlines verified')`;
+  return execFileSync('python', ['-c', script, ...files], { encoding: 'utf8' }).trim();
+}
+async function widths(page, files) {
+  const encoded = files.map(f => fs.readFileSync(f).toString('base64'));
+  return page.evaluate(async (encoded) => {
+    const faces = await Promise.all(encoded.map((raw, i) => new FontFace(`StrokeWidthQA${i}`,
+      Uint8Array.from(atob(raw), c => c.charCodeAt(0))).load()));
+    faces.forEach(f => document.fonts.add(f));
+    const c = document.createElement('canvas'); c.width = c.height = 720;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    return faces.map((_, i) => {
+      ctx.clearRect(0, 0, 720, 720); ctx.fillStyle = '#000'; ctx.font = `640px StrokeWidthQA${i}`;
+      ctx.textBaseline = 'alphabetic'; ctx.fillText('가', 20, 640);
+      const pixels = ctx.getImageData(340, 0, 1, 720).data; let run = 0, runs = [];
+      for (let y = 0; y < 720; y++) { if (pixels[y * 4 + 3] >= 128) run++; else if (run) { runs.push(run); run = 0; } }
+      if (run) runs.push(run); return runs;
+    });
+  }, encoded);
+}
+async function normalFlow(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, acceptDownloads: true });
+  const page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(e.message));
+  await seed(page, saved(basic)); await page.goto(url, { waitUntil: 'domcontentloaded' });
+  assert.equal(await page.locator('#thickness-details').count(), 0, 'old independent experiment is removed');
+  assert(await page.locator('#auto-stroke').isChecked(), 'old saved data defaults to on');
+  assert.equal(await page.locator('#thickness-strength').inputValue(), '100');
+  assert.equal(await page.locator('#thickness-target').inputValue(), '100');
+  assert(await page.locator('#stroke-result').isHidden(), 'no demo poses as the user drawing');
+  const rawSamples = await page.evaluate(() => JSON.parse(localStorage.getItem('geulmoa-drawing-v1')).samples);
+  await page.locator('#stroke-requested').fill('가 고 갸 힣');
+  const defaultPreview = await compare(page, 'default');
+  assert.equal(await page.locator('#stroke-before').innerText(), '가 고 갸');
+  assert.equal(await page.locator('#stroke-after').innerText(), '가 고 갸');
+  assert.match(await page.locator('#stroke-status').innerText(), /표시하지 않은 글자: 힣/);
+  assert.match(await page.locator('#stroke-result-summary').innerText(), /맞춤 적용 2자.*일부 적용 1자/);
+  await page.locator('.stroke-result-details summary').click();
+  assert.match(await page.locator('#stroke-glyph-status').innerText(), /가: 맞춤 적용/);
+  assert.match(await page.locator('#stroke-glyph-status').innerText(), /갸: 일부 자모만 맞춤/);
+  assert.equal(defaultPreview.outputs[1].design.vectorStrength, 100);
+  assert.equal(defaultPreview.outputs[1].design.vectorTarget, 100);
+  const defaultFont = await build(page, 'default.ttf');
+  console.log(verify([defaultPreview.after, defaultFont], `a,b=fonts\nfor c in '가고갸0': assert shape(a,c)==shape(b,c),(c,'preview differs from actual TTF')`));
 
-  const wire=await page.evaluate(()=>window.__vectorJob.samples.map(s=>({char:s.char,size:s.size,roles:Object.fromEntries(Object.entries(s.roles).map(([k,v])=>[k,Array.from(new Uint8Array(v))]))})));
-  const samples=wire.map(s=>({...s,roles:Object.fromEntries(Object.entries(s.roles).map(([k,v])=>[k,Uint8Array.from(v)]))}));
-  const normal=await buildScreenFont(samples,'Normal Baseline');
-  const chars=await page.locator('.lab-glyph').evaluateAll(xs=>xs.map(x=>x.dataset.char));
-  const mismatch=await page.evaluate(async ({base64,chars})=>{
-    const f=await new FontFace('NormalOriginal',Uint8Array.from(atob(base64),c=>c.charCodeAt(0))).load();document.fonts.add(f);
-    const base=document.querySelector('#thickness-before').style.fontFamily,c=document.createElement('canvas');c.width=c.height=280;const ctx=c.getContext('2d',{willReadFrequently:true});
-    function draw(ch,f){ctx.clearRect(0,0,280,280);ctx.font=`200px ${f}`;ctx.fillText(ch,20,225);return ctx.getImageData(0,0,280,280).data}
-    return chars.filter(ch=>{let a=draw(ch,base),b=draw(ch,'NormalOriginal');for(let i=3;i<a.length;i+=4)if(a[i]!==b[i])return true;return false});
-  },{base64:Buffer.from(normal.ttf).toString('base64'),chars});
-  assert.deepEqual(mismatch,[],'before font matches the existing generator for originals and combinations');
-  console.log(`demo ${chars.length} glyphs: centerline fixed widths, source fallback, original baseline parity and ㅇ counters passed (${demoMs}ms)`);
+  await slider(page, '#thickness-target', 70);
+  assert.match(await page.locator('#font-state').innerText(), /다시 생성 필요/);
+  assert.match(await page.locator('#download-font').innerText(), /이전 상태 TTF/);
+  assert(await page.locator('#stroke-result').isHidden());
+  assert.match(await page.locator('#stroke-status').innerText(), /다시 눌러/);
+  const thinPreview = await compare(page, 'thin');
+  assert.equal(thinPreview.outputs[1].design.vectorTarget, 70);
+  const thinFont = await build(page, 'thin.ttf');
+  assert.match(await page.locator('#correction-report-text').innerText(), /기준 굵기 70%/);
+  console.log(verify([thinPreview.after, thinFont], `a,b=fonts\nfor c in '가고갸0': assert shape(a,c)==shape(b,c),(c,'thin preview differs')`));
 
-  await setSlider(page,'#thickness-target',70);assert.match(await page.locator('#thickness-status').innerText(),/설정이 바뀌었어요/);
-  await page.locator('#thickness-run').click();await ready(page);const thin=(await alphaSums(page,['가']))[0].after;
-  const thinTarget=await page.evaluate(()=>window.__vectorResult.target);
-  await setSlider(page,'#thickness-target',130);await page.locator('#thickness-run').click();await ready(page);
-  const thick=(await alphaSums(page,['가']))[0].after,thickTarget=await page.evaluate(()=>window.__vectorResult.target);
-  assert(thickTarget>thinTarget && thick>thin,'target slider changes the actual rendered strokes');
-  await setSlider(page,'#thickness-strength',0);await page.locator('#thickness-run').click();await ready(page);
-  assert((await alphaSums(page,['가','각','곡','갸'])).every(v=>v.different===0),'0% is exactly the existing rendered font');
-  assert.equal(await page.locator('.lab-glyph[data-adjusted="true"]').count(),0);
-  await page.locator('#thickness-text').fill('가힣');assert.match(await page.locator('#thickness-fallback').innerText(),/힣/);
-  console.log('target thickness, 0% off, missing-glyph indication passed');
+  await slider(page, '#thickness-target', 130); const thickPreview = await compare(page, 'thick');
+  const thickFont = await build(page, 'thick.ttf');
+  console.log(verify([thickPreview.after, thickFont], `a,b=fonts\nfor c in '가고갸0': assert shape(a,c)==shape(b,c),(c,'thick preview differs')`));
+  await slider(page, '#thickness-target', 100); await slider(page, '#thickness-strength', 50);
+  const halfPreview = await compare(page, 'half'); const halfFont = await build(page, 'half.ttf');
+  assert.match(await page.locator('#correction-report-text').innerText(), /맞추는 정도 50%/);
+  console.log(verify([halfPreview.after, halfFont], `a,b=fonts\nfor c in '가고갸0': assert shape(a,c)==shape(b,c),(c,'50 percent preview differs')`));
 
-  const along=await runSplitProbe(page,false),across=await runSplitProbe(page,true);
-  assert.equal(along.find(g=>g.char==='갸').steps.find(s=>s.role==='L').method,'vector','same stroke split by manual color along its length');
-  assert.equal(across.find(g=>g.char==='갸').steps.find(s=>s.role==='L').method,'fallback','unrepresentable painted region must be preserved as outline');
-  console.log('manual split: connected path follows paint; ambiguous partial-width coloring falls back instead of guessing');
-  const widthProbe=await runWidthProbe(page);
-  assert(widthProbe.before.every(r=>r.length===2) && widthProbe.after.every(r=>r.length===2),`two separate test strokes: ${JSON.stringify(widthProbe)}`);
-  assert(widthProbe.before[0][0]>widthProbe.before[1][0]+10,`different original scales: ${JSON.stringify(widthProbe)}`);
-  assert(Math.abs(widthProbe.after[0][0]-widthProbe.after[1][0])<=2,`font-rendered stroke widths match: ${JSON.stringify(widthProbe)}`);
-  assert(Math.abs(widthProbe.after[0][0]-widthProbe.target*.64)<=3,`font stroke width matches target: ${JSON.stringify(widthProbe)}`);
-  console.log('fixed width verified in actual TTF rendering across different source scales');
-  const merged=await runMergeWarningProbe(page);
-  assert(merged.find(g=>g.char==='가').warning,'a widened stroke that merges two components must be flagged');
-  console.log('visible warning when wider vector strokes merge passed');
+  await slider(page, '#thickness-strength', 0);
+  assert(await page.locator('#thickness-target').isDisabled(), 'target has no effect at zero strength');
+  const zeroPreview = await compare(page, 'zero');
+  assert.match(await page.locator('#stroke-result-summary').innerText(), /꺼져 있어 두 모습이 같아요/);
+  const zeroFont = await build(page, 'zero.ttf');
+  assert.equal(await page.locator('#correction-report-title').innerText(), '획 굵기 맞춤 꺼짐');
+  assert.match(await page.locator('#correction-report-text').innerText(), /0%/);
+  console.log(verify([zeroPreview.before, zeroPreview.after, zeroFont, defaultPreview.before], `a,b,c,d=fonts\nfor x in '가고갸ㄱ0': assert shape(a,x)==shape(b,x)==shape(c,x)==shape(d,x),(x,'0% must equal baseline')`));
+  const measured = await widths(page, [thinFont, defaultFont, thickFont, halfFont, zeroFont]);
+  assert(measured.every(r => r.length === 2), JSON.stringify(measured));
+  const [thin, normal, thick, half, original] = measured.map(r => r[0]);
+  assert(thin < normal && normal < thick, `target controls actual TTF width: ${JSON.stringify(measured)}`);
+  assert(normal < half && half < original, `strength interpolates toward the original: ${JSON.stringify(measured)}`);
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('geulmoa-drawing-v1')).samples), rawSamples, 'writing and manual paint stay unchanged');
+  console.log(`${browserName}: target/strength in actual downloaded outlines; widths ${JSON.stringify(measured)}`);
 
-  const saved=stateFixture(), prior=await page.evaluate(()=>localStorage.getItem('geulmoa-drawing-v1'));
-  await page.locator('.lab-import summary').click();await page.locator('#thickness-import-data').fill(JSON.stringify(saved));await page.locator('#thickness-import').click();await ready(page);
-  assert.equal(await page.locator('.lab-glyph[data-kind="original"]').count(),2);assert.match(await page.locator('#thickness-status').innerText(),/국/);
-  assert(await page.evaluate(()=>window.__vectorJob.samples.every(s=>Array.isArray(s.strokes)&&s.strokes.length>0)));
-  assert.equal(await page.evaluate(()=>localStorage.getItem('geulmoa-drawing-v1')),prior,'pasted data is not stored');
-  await page.evaluate(s=>localStorage.setItem('geulmoa-drawing-v1',JSON.stringify(s)),saved);await page.reload({waitUntil:'domcontentloaded'});await ready(page);
-  await page.locator('#thickness-mine').click();await ready(page);
-  assert.equal(await page.locator('.lab-glyph[data-kind="original"]').count(),2);assert.match(await page.locator('#thickness-status').innerText(),/국/);
-  console.log('import and local samples: original trajectories included; incomplete work excluded; no overwrite passed');
-  assert.deepEqual(errors,[]);await page.close();
+  const fresh = await context.newPage(); await fresh.goto(url);
+  assert.equal(await fresh.locator('#thickness-strength').inputValue(), '0');
+  assert.equal(await fresh.locator('#thickness-target').inputValue(), '100');
+  assert(await fresh.locator('#thickness-target').isDisabled()); await fresh.close();
+  await page.locator('#auto-stroke').uncheck();
+  assert(await page.locator('#thickness-strength').isDisabled());
+  const another = await context.newPage(); await another.goto(url);
+  assert(!await another.locator('#auto-stroke').isChecked(), 'toggle persists'); await another.close();
+  await page.locator('#auto-stroke').check(); await slider(page, '#thickness-strength', 50); await slider(page, '#thickness-target', 130);
+  assert.match(await page.locator('#stroke-export-summary').innerText(), /50%.*130%/);
+  await page.locator('#stroke-requested').fill('가A'); await page.locator('#stroke-compare').click();
+  assert.match(await page.locator('#stroke-status').innerText(), /한글 음절만/);
+  await page.locator('#stroke-requested').fill('가각갂갃간갅갆갇갈갉갊갋갌갍갎갏감갑값갓갔강갖갗');
+  await page.locator('#stroke-compare').click(); assert.match(await page.locator('#stroke-status').innerText(), /20자 이내/);
 
-  const drawing=await browser.newPage({viewport:{width:1440,height:1000}});
-  await drawing.addInitScript(()=>{const p=Worker.prototype.postMessage;Worker.prototype.postMessage=function(m,t){if(typeof m.targetRatio==='number')window.__vectorJob=m;return p.call(this,m,t)}});
-  await drawing.goto(url,{waitUntil:'domcontentloaded'});await ready(drawing);
-  await drawing.locator('.sample-chip',{hasText:'가'}).first().click();
-  await drawing.locator('#start-writing').click();
-  await stroke(drawing,[[.19,.26],[.49,.26],[.49,.70],[.49,.50],[.69,.50],[.69,.20],[.69,.78]]);
-  await drawing.locator('#next-step').click();await stroke(drawing,[[.19,.26],[.49,.26],[.49,.70]]);
-  await drawing.locator('#next-step').click();await stroke(drawing,[[.49,.50],[.69,.50],[.69,.20],[.69,.78]]);
-  assert.match(await drawing.locator('#paint-status').innerText(),/모든 획을 자모별로 나눴어요/);
-  await drawing.locator('#capture-close').click();
-  await drawing.locator('#thickness-requested').fill('갸');await drawing.locator('#thickness-mine').click();await ready(drawing);
-  assert.equal(await drawing.locator('.lab-glyph[data-char="가"]').getAttribute('data-adjusted'),'true');
-  const capture=await drawing.evaluate(()=>window.__vectorJob.samples.find(s=>s.char==='가'));
-  assert.equal(capture.strokes.length,1,'one continuous handwritten path is sent as one path, not forcibly split by role');
-  assert(capture.strokes[0].points.length>5,'the actual pointer path is retained');
-  console.log('actual browser draw → manual color → stored trajectory → vector comparison passed');
-  await drawing.close();
-
-  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
-  const mobileErrors=[];mobile.on('pageerror',e=>mobileErrors.push(e.message));await mobile.goto(url,{waitUntil:'domcontentloaded'});await ready(mobile);
-  const size=await mobile.evaluate(()=>({client:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth}));
-  assert(size.scroll<=size.client+1,`mobile overflow ${JSON.stringify(size)}`);assert.deepEqual(mobileErrors,[]);await mobile.close();
-  console.log('mobile preview passed');await browser.close();
-})().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});
+  // A changed setting while a slow job runs must never show a stale preview as current.
+  await page.locator('#stroke-requested').fill('가 고 갸'); await page.evaluate(() => { window.__slowPreview = true; });
+  await page.locator('#stroke-compare').click(); await slider(page, '#thickness-target', 70);
+  await page.waitForFunction(() => !document.querySelector('#stroke-compare').disabled, null, { timeout: 120000 });
+  assert(await page.locator('#stroke-result').isHidden()); assert.match(await page.locator('#stroke-status').innerText(), /바뀌었어요/);
+  await page.evaluate(() => { window.__slowPreview = false; });
+  const width = await page.evaluate(() => ({ inner: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+  assert(width.scroll <= width.inner + 1, JSON.stringify(width)); assert.deepEqual(errors, []);
+  await context.close(); return { defaultFont, zeroFont };
+}
+async function designerConsistency(browser) {
+  const L = [], V = [];
+  for (let i = 0; i <= 40; i++) L.push([.15 + .0075 * i, .24 + (i === 40 ? 0 : .003 * Math.sin(i * 1.8))]);
+  for (let i = 1; i <= 44; i++) L.push([.45 + .003 * Math.sin(i * 1.8 + 1), .24 + .01 * i]);
+  for (let i = 0; i <= 55; i++) V.push([.68 + .003 * Math.sin(i * 1.8), .15 + .011 * i]);
+  const wavy = { version: 2, actions: [
+    ...[L,V].map(points => ({ kind: 'ink', device: 'touch', points })),
+    ...[L,V].map((points, i) => ({ kind: 'paint', role: i ? 'V' : 'L', width: .12, points }))
+  ] };
+  const page = await browser.newPage({ acceptDownloads: true }); await seed(page, saved({ 가: wavy })); await page.goto(url);
+  await slider(page, '#design-cleanup', 100); await page.locator('#design-device').selectOption('touch');
+  await slider(page, '#design-spacing', 130); await slider(page, '#design-word', 750); await slider(page, '#design-va', 80);
+  await slider(page, '#thickness-strength', 70); await slider(page, '#thickness-target', 110);
+  await page.locator('#stroke-requested').fill('가갸'); const preview = await compare(page, 'designer');
+  assert.equal(preview.outputs[1].design.cleanupStrength, 100); assert.equal(preview.outputs[1].design.letterSpacing, 130);
+  assert.equal(preview.outputs[1].design.wordSpace, 750); assert.equal(preview.outputs[1].design.verticalOffset, 80);
+  const actual = await build(page, 'designer-settings.ttf'); assert.match(await page.locator('#result-warning').innerText(), /흔들림 정리 적용: 가/);
+  console.log(verify([preview.after, actual], `a,b=fonts\nfor c in '가갸ㄱ': assert shape(a,c)==shape(b,c),(c,'cleanup/metrics preview differs')`));
+  await page.close(); console.log(`${browserName}: preview honors actual cleanup, spacing, vertical and stroke settings`);
+}
+async function safety(browser) {
+  const page = await browser.newPage({ acceptDownloads: true }); await seed(page, saved(risk)); await page.goto(url);
+  await page.locator('#stroke-requested').fill('가고'); const preview = await compare(page, 'risk');
+  assert.equal(preview.outputs[1].report.byChar['가'].status, 'kept');
+  await page.locator('.stroke-result-details summary').click();
+  assert.match(await page.locator('#stroke-glyph-status').innerText(), /가: 맞춤 전 윤곽 유지.*덩어리·구멍/);
+  const on = await build(page, 'risk-on.ttf'); await page.locator('#auto-stroke').uncheck(); const off = await build(page, 'risk-off.ttf');
+  console.log(verify([preview.before, preview.after, on, off], `a,b,c,d=fonts\nassert shape(a,'가')==shape(b,'가')==shape(c,'가')==shape(d,'가'), 'unsafe merge must preserve baseline'\nassert shape(b,'고')==shape(c,'고')!=shape(d,'고'), 'safe glyph must still be corrected'`));
+  await page.close(); console.log(`${browserName}: unsafe shape and per-character reasons are consistent in preview and TTF`);
+}
+async function fallback(browser, reference) {
+  const page = await browser.newPage({ acceptDownloads: true }); await seed(page, saved(basic));
+  await page.route('**/worker.js*', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `self.OffscreenCanvas = undefined;\n${workerSource}` }));
+  await page.goto(url); await page.locator('#stroke-requested').fill('가 고 갸');
+  await compare(page, 'canvas-fallback', false);
+  assert.match(await page.locator('#stroke-status').innerText(), /브라우저 호환 모드/);
+  const dom = await build(page, 'canvas-fallback.ttf'); assert.match(await page.locator('#build-status').innerText(), /브라우저 호환 모드/);
+  console.log(verify([reference.defaultFont, dom], `a,b=fonts\nfor c in '가고갸ㄱ0': assert shape(a,c)==shape(b,c),(c,'worker and DOM canvas differ')`)); await page.close();
+  const missing = await browser.newPage({ acceptDownloads: true }); await seed(missing, saved(basic), 'no-path2d'); await missing.goto(url);
+  await missing.locator('#stroke-requested').fill('가 고 갸'); await compare(missing, 'unavailable', false);
+  assert.match(await missing.locator('#stroke-result-summary').innerText(), /이 브라우저에서.*맞춤 전 윤곽/);
+  const kept = await build(missing, 'unavailable.ttf'); assert.match(await missing.locator('#correction-report-title').innerText(), /사용할 수 없어요/);
+  console.log(verify([reference.zeroFont, kept], `a,b=fonts\nfor c in '가고갸ㄱ0': assert shape(a,c)==shape(b,c),(c,'unavailable canvas must preserve baseline')`));
+  await missing.close(); console.log(`${browserName}: comparison and export use DOM-canvas fallback; missing canvas preserves outlines`);
+}
+(async () => {
+  const browser = await browserType.launch({ headless: true, ...(browserName === 'chromium' ? { args: ['--no-sandbox'] } : {}) });
+  try { const reference = await normalFlow(browser); await designerConsistency(browser); await safety(browser); await fallback(browser, reference); }
+  finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -124,12 +124,12 @@ async function basicFlow(browser) {
   assert.match(await page.locator('#correction-report-kept').innerText(), /보정 전 음절 윤곽 유지/);
   await page.locator('#correction-report-more summary').click();
   assert.match(await page.locator('#correction-report-detail').innerText(), /숫자·기호 1자는 원래 윤곽/);
-  await page.locator('#inspect-char').fill('가'); assert.match(await page.locator('#inspect-status').innerText(), /벡터 획 굵기를 보정/);
+  await page.locator('#inspect-char').fill('가'); assert.match(await page.locator('#inspect-status').innerText(), /획 굵기 맞춤을 적용/);
   await page.locator('#inspect-char').fill('갸'); assert.match(await page.locator('#inspect-status').innerText(), /일부 자모만/);
   await page.locator('#auto-stroke').uncheck();
   assert.match(await page.locator('#font-state').innerText(), /다시 생성 필요/);
   const offFile = await build(page, `${browserName}-off.ttf`);
-  assert.equal(await page.locator('#correction-report-title').innerText(), '벡터 획 보정 꺼짐');
+  assert.equal(await page.locator('#correction-report-title').innerText(), '획 굵기 맞춤 꺼짐');
   assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('geulmoa-drawing-v1')).samples), before, 'neither paths nor manual paint are changed');
   console.log(compareFonts([onFile, offFile], `a,b=fonts\nfor c in '가고갸ㄱ': assert shape(a,c)!=shape(b,c),(c,'must change in the real TTF')\nassert shape(a,'0')==shape(b,'0'), 'digits retain their old outline'`));
   const widths = await compareRenderedWidths(page, onFile, offFile, correction.target);

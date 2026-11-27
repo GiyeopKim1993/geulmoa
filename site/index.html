@@ -4,15 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f8f7f2">
-  <meta name="description" content="화면에 쓴 손글씨로 나만의 한글 폰트를 만드는 실험실">
+  <meta name="description" content="화면에 쓴 손글씨로 나만의 한글 폰트를 만들어요">
   <title>글모아 — 나의 글씨가 폰트가 되는 곳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23292a2b'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='42' fill='%23f7f5ec' font-family='sans-serif'%3E%E3%85%8E%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=auto-vector-1">
-  <script src="coloring.js?v=auto-vector-1" defer></script>
-  <script src="stroke-cleanup.js?v=auto-vector-1" defer></script>
-  <script src="designer-ui.js?v=auto-vector-1" defer></script>
-  <script src="thickness-ui.js?v=auto-vector-1" defer></script>
-  <script src="app.js?v=auto-vector-1" defer></script>
+  <link rel="stylesheet" href="style.css?v=stroke-ui-2">
+  <script src="coloring.js?v=stroke-ui-2" defer></script>
+  <script src="stroke-cleanup.js?v=stroke-ui-2" defer></script>
+  <script src="designer-ui.js?v=stroke-ui-2" defer></script>
+  <script src="app.js?v=stroke-ui-2" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -22,7 +21,7 @@
         <span class="brand-name">글모아<span>손글씨 폰트 스튜디오</span></span>
       </a>
       <nav class="top-nav" aria-label="페이지 이동">
-        <a href="#studio">글씨 쓰기</a><a href="#preview">폰트 만들기</a><a href="#thickness-test">획 굵기 비교</a><a href="#designer">폰트 조절</a>
+        <a href="#studio">글씨 쓰기</a><a href="#stroke-settings">획 굵기</a><a href="#preview">폰트 만들기</a><a href="#designer">폰트 조절</a>
       </nav>
       <div class="top-local"><span class="local-dot"></span> 내 기기에서 작업 중</div>
     </div>
@@ -86,12 +85,37 @@
 
     <section class="preview-section wrap" id="preview" aria-labelledby="preview-title">
       <div class="section-heading preview-heading"><div><div class="section-kicker">A FIRST LOOK <span>02 / 03</span></div><h2 id="preview-title">내 글씨로, 직접 써 보세요.</h2><p>모은 글자를 조합해 미리 보고 폰트 파일로 저장할 수 있어요.</p></div><div class="preview-ornament" aria-hidden="true">가 <span>→</span> ㅎ</div></div>
+      <div class="stroke-settings panel" id="stroke-settings" aria-labelledby="stroke-heading">
+        <div class="stroke-controls-side">
+          <div class="stroke-heading"><div><span class="tiny-label">STROKE BALANCE</span><h3 id="stroke-heading">획 굵기를 고르게 맞춰요.</h3><p>크기가 달라진 글자의 획을 비슷한 굵기로 맞춰 볼 수 있어요.</p><a class="stroke-go-build" href="#font-export">이 설정으로 폰트 만들기 ↓</a></div><span class="stroke-badge">기본 켜짐</span></div>
+          <label class="correction-toggle" for="auto-stroke"><span><b>획 굵기 자동 맞춤</b><small>저장된 획 경로를 다시 그려요. 원본 필기와 색칠은 그대로예요.</small></span><input id="auto-stroke" type="checkbox" checked aria-describedby="stroke-safety"></label>
+          <div class="stroke-sliders" role="group" aria-label="획 굵기 맞춤 설정">
+            <div class="stroke-slider"><label for="thickness-strength">맞추는 정도 <output id="thickness-strength-value" for="thickness-strength">100%</output></label><input id="thickness-strength" type="range" min="0" max="100" step="10" value="100" aria-describedby="stroke-strength-help"><div class="stroke-range-ends"><span>원래대로</span><span>고르게</span></div><p id="stroke-strength-help">0%는 맞추지 않아요. 100%는 가능한 획을 기준 굵기로 다시 그려요.</p></div>
+            <div class="stroke-slider"><label for="thickness-target">기준 굵기 <output id="thickness-target-value" for="thickness-target">100% · 내 글씨 기준</output></label><input id="thickness-target" type="range" min="70" max="130" step="10" value="100" aria-describedby="stroke-target-help"><div class="stroke-range-ends"><span>더 얇게</span><span>더 두껍게</span></div><p id="stroke-target-help">완성한 내 글씨에서 정한 굵기가 100%예요. 너무 얇거나 두꺼운 획은 범위가 제한될 수 있어요.</p></div>
+          </div>
+          <p class="stroke-safety" id="stroke-safety">형태가 크게 달라질 위험이 있으면 일부 또는 전체의 기존 윤곽을 유지해요. 작은 변화는 놓칠 수 있으니 직접 확인해 주세요.</p>
+          <p class="stroke-applies">이 설정은 이 브라우저에 저장되고, <b>다음에 만드는 TTF에 적용</b>돼요.</p>
+        </div>
+        <div class="stroke-check-side">
+          <div class="stroke-check-heading"><div><span class="tiny-label">BEFORE &amp; AFTER</span><h3>내 글씨로 전후 확인</h3></div><span>선택 사항</span></div>
+          <p class="stroke-check-intro">아래 비교는 실제 폰트와 같은 방법과 안전검사를 사용해요.</p>
+          <label class="stroke-request-label" for="stroke-requested">비교할 한글 <span>최대 20자</span></label>
+          <input id="stroke-requested" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="비워두면 직접 쓴 글자" aria-describedby="stroke-request-help">
+          <p class="stroke-request-help" id="stroke-request-help">비워두면 직접 쓰고 색칠한 글자 중 최대 6자를 보여줘요. 조합 글자도 입력할 수 있어요.</p>
+          <button id="stroke-compare" type="button" class="button button-light stroke-compare">전후 비교하기 <span>↗</span></button>
+          <p class="stroke-status" id="stroke-status" role="status" aria-live="polite">글씨를 쓰고 자모 색칠을 완료한 뒤 비교할 수 있어요.</p>
+          <div id="stroke-result" class="stroke-result" hidden>
+            <div class="stroke-pair"><article class="stroke-card"><b>맞춤 전</b><p id="stroke-before" class="stroke-sample" aria-label="맞춤 전 글자"></p><small>작은 크기</small><p id="stroke-small-before" class="stroke-small-sample" aria-label="맞춤 전 작은 글자"></p></article><article class="stroke-card stroke-card-after"><b>현재 설정</b><p id="stroke-after" class="stroke-sample" aria-label="현재 설정의 글자"></p><small>작은 크기</small><p id="stroke-small-after" class="stroke-small-sample" aria-label="현재 설정의 작은 글자"></p></article></div>
+            <p id="stroke-result-summary" class="stroke-result-summary"></p>
+            <details class="stroke-result-details"><summary>글자별 적용 상태 보기</summary><ul id="stroke-glyph-status"></ul></details>
+          </div>
+        </div>
+      </div>
       <div class="preview-grid">
-        <div class="panel export-panel">
+        <div class="panel export-panel" id="font-export">
           <span class="tiny-label">MAKE YOUR FONT</span><h3>이제, 폰트로<br>만들어 볼까요?</h3><p>색칠을 완료한 글자만 사용해요. 적은 글자로 만들면 일부 음절은 폰트에서 빠질 수 있습니다.</p>
           <label for="font-name">폰트 이름</label><input id="font-name" type="text" value="My Hand" maxlength="40" autocomplete="off">
-          <label class="correction-toggle" for="auto-stroke"><span><b>벡터 획 굵기 자동 보정</b><small>크기를 맞춘 뒤 획을 다시 그려요. 원본 필기는 바뀌지 않아요.</small></span><input id="auto-stroke" type="checkbox" checked aria-describedby="correction-toggle-help"></label>
-          <p class="correction-toggle-help" id="correction-toggle-help">모양이 크게 달라질 위험이 있으면 기존 윤곽을 유지하고 결과에 알려드려요.</p>
+          <p class="stroke-export-summary" id="stroke-export-summary">획 굵기 맞춤 · 100% / 기준 100%</p><a class="stroke-export-link" href="#stroke-settings">획 굵기 설정 살펴보기 ↑</a>
           <button class="button button-primary build-button" id="build-font" type="button">내 폰트 만들기 <span>↗</span></button>
           <a class="button button-dark download-button" id="download-font" href="#" hidden download>TTF 다운로드 <span>↓</span></a>
           <p class="download-help" id="download-help" hidden>다운로드가 막혔다면 먼저 <a href="#sample-list">백업 내용을 복사</a>해 보관하세요. 이 화면을 브라우저의 새 탭에서 연 뒤, 아래 ‘다른 주소에 저장한 글씨 가져오기’에 붙여 넣고 다시 만들 수 있어요.</p>
@@ -109,40 +133,16 @@
       </div>
       <div class="result-info" id="result-info" hidden>
         <div class="result-stats"><div><span>지원 한글 음절</span><strong id="stat-coverage">0 <small>/ 11,172</small></strong></div><div><span>직접 쓴 음절</span><strong id="stat-original">0 <small>자</small></strong></div><div><span>문맥별 자모 샘플</span><strong id="stat-context">0 <small>개</small></strong></div><div><span>숫자 · 기호</span><strong id="stat-extra">0 <small>자</small></strong></div></div>
-        <div class="correction-report" id="correction-report" role="status"><span class="correction-report-icon" aria-hidden="true">✦</span><div><b id="correction-report-title">벡터 획 보정 결과</b><p id="correction-report-text"></p><p class="correction-kept" id="correction-report-kept"></p><details class="correction-more" id="correction-report-more"><summary>보정 예외와 확인 사항</summary><small id="correction-report-detail"></small></details></div></div>
+        <div class="correction-report" id="correction-report" role="status"><span class="correction-report-icon" aria-hidden="true">✦</span><div><b id="correction-report-title">획 굵기 맞춤 결과</b><p id="correction-report-text"></p><p class="correction-kept" id="correction-report-kept"></p><details class="correction-more" id="correction-report-more"><summary>보정 예외와 확인 사항</summary><small id="correction-report-detail"></small></details></div></div>
         <p id="result-warning" class="result-warning"></p><div id="suggestions" class="suggestions"></div>
-        <p class="result-caveat">직접 쓴 음절을 우선 사용하고, 나머지는 수집한 자모를 조합하거나 추정합니다. 벡터 보정은 저장된 획 경로를 다시 그리며, 512픽셀 격자의 형태 검사는 모든 변화를 보장하지 않아요. 겹받침·복합 모음 등과 작은 글씨는 실제 필체와 다를 수 있으니 반드시 확인해 주세요. 영문은 아직 지원하지 않습니다.</p>
+        <p class="result-caveat">직접 쓴 음절을 우선 사용하고, 나머지는 수집한 자모를 조합하거나 추정합니다. 획 굵기 맞춤은 저장된 획 경로를 다시 그리며, 형태 검사는 모든 변화를 찾아내지 못해요. 겹받침·복합 모음 등과 작은 글씨는 실제 필체와 다를 수 있으니 반드시 확인해 주세요. 영문은 아직 지원하지 않습니다.</p>
       </div>
     </section>
 
     <section class="bottom-note wrap" aria-label="다시 글씨 쓰기"><div class="bottom-spark" aria-hidden="true">✳</div><div><b>조금 삐뚤어도 괜찮아요.</b><p>나를 닮은 글씨에는 나만의 이야기가 있으니까요.</p></div><a href="#studio">글씨 쓰기로 돌아가기 ↑</a></section>
 
-    <section class="thickness-lab wrap" id="thickness-test" aria-label="선택 사항: 이전 획 굵기 실험">
-      <details class="lab-disclosure" id="thickness-details"><summary class="lab-summary"><div><span class="tiny-label">OPTIONAL EXPERIMENT</span><b>이전 실험 · 획 굵기 비교</b><small>원할 때만 열어서 비교해 보세요.</small></div><span class="lab-summary-action" aria-hidden="true"></span></summary>
-      <div class="lab-shell">
-        <div class="lab-heading"><div><div class="section-kicker">STROKE PATH LAB <span>LOCAL ONLY</span></div><h2 id="thickness-title">획 경로로 굵기를 맞춰봐요.</h2><p>글씨 경로의 크기는 맞추고, 획의 굵기는 따로 정해 다시 그려 봅니다.</p></div><span class="lab-pill">새 로컬 실험</span></div>
-        <div class="lab-disclaimer"><b>외곽선을 깎지 않습니다.</b> 저장된 획 경로를 조정한 굵기로 다시 그린 뒤 비교용 윤곽을 만들어요. 이 비교는 직접 쓴 한글 최대 30자와 지정한 조합 글자만 담는 별도 실험입니다. 위의 실제 폰트 자동 보정은 별도 안전검사를 거치므로 결과가 다를 수 있어요. 숫자·기호는 비교에서 제외해요.</div>
-        <div class="lab-controls">
-          <div class="lab-control"><span class="lab-label">1. 비교할 글씨</span><div class="lab-source-buttons"><button id="thickness-demo" class="lab-choice active" type="button" aria-pressed="true">예시 글씨</button><button id="thickness-mine" class="lab-choice" type="button" aria-pressed="false">여기서 쓴 내 글씨</button></div><p id="thickness-source-help">같은 펜으로 작게·크게 쓴 가상의 예시예요. 실제 손글씨가 아닙니다.</p></div>
-          <div class="lab-control"><label class="lab-label" for="thickness-strength">2. 굵기 맞춤 정도 <output id="thickness-strength-value" for="thickness-strength">100%</output></label><input id="thickness-strength" type="range" min="0" max="100" step="10" value="100"><p>0%는 기존 결과 · 100%는 사용 가능한 획을 기준 굵기로 다시 그려요.</p></div>
-          <div class="lab-control"><label class="lab-label" for="thickness-target">3. 기준 굵기 <output id="thickness-target-value" for="thickness-target">100%</output></label><input id="thickness-target" type="range" min="70" max="130" step="10" value="100"><p>직접 쓴 글자들의 기본 굵기를 기준으로 더 얇거나 두껍게 조절해요.</p></div>
-        </div>
-        <details class="lab-import"><summary>다른 주소에 저장한 글씨로 비교하기 <span>선택</span></summary><p>주소가 다르면 저장된 글씨가 자동으로 연결되지 않아요. 컴퓨터에서 다른 주소의 글모아를 열고 개발자 도구(F12)의 <b>Application → Local Storage → 사이트 주소</b>에서 <code>geulmoa-drawing-v1</code> 항목의 Value를 복사해 아래에 붙여 넣어 주세요. 서버로 전송하거나 다른 주소의 원본을 수정하지 않습니다.</p><label for="thickness-import-data">복사한 저장 데이터</label><textarea id="thickness-import-data" spellcheck="false" placeholder="복사한 데이터를 여기에 붙여 넣으세요"></textarea><button class="lab-choice" id="thickness-import" type="button">붙여 넣은 글씨로 비교하기</button></details>
-        <div class="lab-request"><label for="thickness-requested">함께 볼 조합 글자 <span>입력된 자모로 만들 수 있는 글자만 · 최대 20자</span></label><div><input id="thickness-requested" type="text" maxlength="100" value="구 곡 강 궁 삭 상 속 숭 격 갸" autocomplete="off" spellcheck="false"><button id="thickness-run" type="button" class="button button-primary">비교 만들기 <span>↗</span></button></div></div>
-        <p class="lab-status" id="thickness-status" role="status" aria-live="polite">예시 비교를 준비하고 있어요.</p>
-        <div class="lab-result" id="thickness-result" hidden>
-          <div class="lab-result-top"><label for="thickness-text">미리 볼 글자 <span>아래에서 비교 대상으로 만든 글자만 내 폰트로 표시돼요.</span></label><input id="thickness-text" type="text" maxlength="100" autocomplete="off" spellcheck="false"><p id="thickness-fallback" class="lab-fallback"></p></div>
-          <div class="lab-pair"><article class="lab-card lab-card-before"><div class="lab-card-title"><span>01 / BEFORE</span><strong>기존 방식</strong></div><p id="thickness-before" class="lab-sample" aria-label="보정 전 미리보기"></p><div class="lab-small-label">일반 크기 · 18px</div><p id="thickness-small-before" class="lab-small-sample" aria-label="보정 전 작은 글씨 미리보기"></p><a id="thickness-download-before" download="geulmoa-path-before.ttf">비교용 TTF 받기 ↓</a></article><article class="lab-card lab-card-after"><div class="lab-card-title"><span>02 / AFTER</span><strong>획 경로 방식</strong></div><p id="thickness-after" class="lab-sample" aria-label="보정 후 미리보기"></p><div class="lab-small-label">일반 크기 · 18px</div><p id="thickness-small-after" class="lab-small-sample" aria-label="보정 후 작은 글씨 미리보기"></p><a id="thickness-download-after" download="geulmoa-path-after.ttf">비교용 TTF 받기 ↓</a></article></div>
-          <p class="lab-fallback">비교용 TTF는 표시된 일부 글자만 포함합니다. 실사용 폰트가 아니며, 포함되지 않은 글자는 기기 기본 글꼴로 보일 수 있어요.</p>
-          <div class="lab-details"><strong>글자별 비교</strong><span id="thickness-summary"></span></div><div id="thickness-glyphs" class="lab-glyphs"></div>
-          <p class="lab-fallback">조합 글자는 사용자가 칠한 픽셀을 따라 저장된 경로를 나눕니다. 경계가 충분히 재현되지 않거나 직접 쓰지 않아 추정한 자모는 기존 윤곽을 유지해요. 다시 그린 곡선과 획 끝이 기존 윤곽과 조금 달라질 수 있고, 굵기에 따라 획이 붙거나 ㅇ의 구멍이 작아질 수도 있어요. 입력은 현재 고정 굵기라 필압은 반영되지 않습니다.</p>
-        </div>
-      </div>
-      </details>
-    </section>
-
     <section class="designer wrap" id="designer" aria-labelledby="designer-title">
-      <div class="designer-heading"><div><div class="section-kicker">FONT DESIGN LAB <span>LOCAL ONLY</span></div><h2 id="designer-title">내 글씨의 균형을 맞춰요.</h2><p>손글씨의 개성은 남기고, 기기 흔들림과 글자의 간격·높이를 직접 살펴보세요.</p></div><span class="lab-pill">기기에 저장</span></div>
+      <div class="designer-heading"><div><div class="section-kicker">FONT DETAILS <span>LOCAL ONLY</span></div><h2 id="designer-title">내 글씨의 균형을 맞춰요.</h2><p>손글씨의 개성은 남기고, 기기 흔들림과 글자의 간격·높이를 직접 살펴보세요.</p></div><span class="lab-pill">기기에 저장</span></div>
       <div class="designer-shell"><div class="designer-layout">
         <div class="designer-settings">
           <div class="designer-mini" aria-label="조절 중인 간격과 기준선 미리보기"><div><b>조절 미리보기</b><span id="design-mini-source">시스템 예시</span></div><canvas id="design-mini-specimen" aria-label="현재 간격과 높이 미리보기"></canvas></div>
@@ -156,7 +156,7 @@
         <div class="designer-preview"><div class="designer-preview-head"><div><span class="tiny-label">LIVE SPECIMEN</span><h3>간격과 기준선 살펴보기</h3></div><span class="designer-live">● LIVE</span></div><label for="design-preview-input">테스트할 글자</label><input id="design-preview-input" value="가가 가나 가나다" maxlength="35" autocomplete="off" spellcheck="false"><div class="design-canvas-wrap"><canvas id="design-specimen" aria-label="글자 간격과 기준선 미리보기"></canvas></div><p class="designer-caption" id="design-sample-status">현재 시스템 글꼴 예시예요. 폰트를 생성하면 내 글씨로 확인할 수 있어요.</p>
           <div class="design-stroke-title"><div><span class="tiny-label">STROKE COMPARISON</span><h3>흔들림 정리 전후</h3></div><span id="design-drawing-source">가상의 입력 예시</span></div><div class="design-stroke-pair"><div><span>원본</span><canvas id="design-stroke-before" width="320" height="210" aria-label="원본 획 미리보기"></canvas></div><div><span>다듬기 미리보기</span><canvas id="design-stroke-after" width="320" height="210" aria-label="다듬은 획 미리보기"></canvas></div></div><p class="designer-caption" id="design-stroke-status" role="status">선택한 글자가 없어서 가상의 입력 예시를 보여요.</p>
         </div>
-      </div><div class="designer-footnote"><span><b>내 폰트 설정</b> · 설정은 이름별로 저장되고, 다시 생성한 TTF에 반영됩니다. 위의 자동 획 보정과 함께 적용돼요. 세로 정렬에 따라 줄 높이가 달라질 수 있어요.</span><a href="#preview">폰트 만들기 ↑</a></div></div>
+      </div><div class="designer-footnote"><span><b>내 폰트 설정</b> · 설정은 이름별로 저장되고, 다시 생성한 TTF에 반영됩니다. 위의 획 굵기 맞춤과 함께 적용돼요. 세로 정렬에 따라 줄 높이가 달라질 수 있어요.</span><a href="#preview">폰트 만들기 ↑</a></div></div>
       <details class="designer-import"><summary>다른 주소에 저장한 글씨 가져오기 <span>선택 · 이 기기에만 복사</span></summary><p>다른 주소의 글모아를 열고 개발자 도구의 <b>Application → Local Storage</b>에서 <code>geulmoa-drawing-v1</code>의 Value를 복사해 붙여 넣어 주세요. 현재 주소에 아직 필기가 없는 글자만 추가합니다. 기존 글씨나 다른 주소의 데이터는 바꾸지 않아요.</p><label for="designer-import-data">저장 데이터 JSON</label><textarea id="designer-import-data" spellcheck="false" placeholder="복사한 데이터를 여기에 붙여 넣으세요"></textarea><button id="designer-import-button" class="lab-choice" type="button">이 주소에 글씨 복사하기</button><p id="designer-import-status" role="status" aria-live="polite"></p></details>
     </section>
 
@@ -183,6 +183,6 @@
   <dialog class="capture-dialog" id="modal-vowel" aria-modal="true" aria-labelledby="capture-modal-title" aria-describedby="capture-modal-description"></dialog>
   <dialog class="capture-dialog" id="modal-final" aria-modal="true" aria-labelledby="capture-modal-title" aria-describedby="capture-modal-description"></dialog>
 
-  <footer class="footer wrap"><div><b>글모아</b><span>당신의 글씨를 오래도록.</span></div><p>실험용 프로토타입 · 기반 코드 <a href="https://github.com/maxi08aidot/kor-your-font" target="_blank" rel="noopener noreferrer">kor-your-font</a> · <a href="third-party-licenses.txt" target="_blank" rel="noopener noreferrer">라이선스</a></p></footer>
+  <footer class="footer wrap"><div><b>글모아</b><span>당신의 글씨를 오래도록.</span></div><p>손글씨 폰트 스튜디오 · 기반 코드 <a href="https://github.com/maxi08aidot/kor-your-font" target="_blank" rel="noopener noreferrer">kor-your-font</a> · <a href="third-party-licenses.txt" target="_blank" rel="noopener noreferrer">라이선스</a></p></footer>
 </body>
 </html>

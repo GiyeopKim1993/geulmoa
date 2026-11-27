@@ -22,15 +22,25 @@ fs.mkdirSync(OUT, { recursive: true });
     const errors = []; page.on('pageerror', (e) => errors.push(e.message));
     await page.addInitScript((samples) => {
       localStorage.setItem('geulmoa-drawing-v1', JSON.stringify({ samples, custom: [], current: '가', fontName: 'Full Vector QA', preview: '안녕하세요. 가각 곽 성 공' }));
-      window.__results = []; window.__ticks = 0; setInterval(() => window.__ticks++, 25);
+      window.__results = []; window.__previews = []; window.__ticks = 0; setInterval(() => window.__ticks++, 25);
       const send = Worker.prototype.postMessage;
       Worker.prototype.postMessage = function(message, transfer) {
-        if (message.design) this.addEventListener('message', ({ data }) => { if (data.type === 'done') window.__results.push(data.strokeCorrection); });
+        if (message.design) this.addEventListener('message', ({ data }) => {
+          if (data.type !== 'done') return;
+          window.__results.push(data.strokeCorrection);
+          if (typeof message.design.previewChars === 'string') window.__previews.push({ ttf: Array.from(new Uint8Array(data.ttf)), report: data.strokeCorrection });
+        });
         return send.call(this, message, transfer);
       };
     }, samples);
     await page.goto(url); const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('geulmoa-drawing-v1')).samples);
     assert(await page.locator('#auto-stroke').isChecked());
+    const requested = '가각곽성공안녕한힣꽋녘밟뻔쏴읽퉤괭쪽묶깞';
+    await page.locator('#stroke-requested').fill(requested); await page.locator('#stroke-compare').click();
+    await page.waitForFunction(() => !document.querySelector('#stroke-compare').disabled, null, { timeout: 240000 });
+    assert(!await page.locator('#stroke-status').evaluate(e => e.classList.contains('error')), await page.locator('#stroke-status').innerText());
+    const previews = await page.evaluate(() => window.__previews); assert.equal(previews.length, 2);
+    const previewFiles = previews.map((p, i) => { const f = path.join(OUT, `full-preview-${i}.ttf`); fs.writeFileSync(f, Buffer.from(p.ttf)); return f; });
     async function build(name) {
       const n = await page.evaluate(() => window.__results.length), start = Date.now();
       await page.locator('#build-font').click();
@@ -49,13 +59,14 @@ fs.mkdirSync(OUT, { recursive: true });
     const collisionReason = '자모 사이의 획이 닿거나 닿을 수 있음';
     assert(on.meta.reasons[collisionReason] > 0, 'inter-role safety is actually exercised');
     assert(Object.values(on.meta.byChar).some((v) => v.status === 'kept' && v.reasons.includes(collisionReason)));
-    assert.match(await page.locator('#correction-report-title').innerText(), /자동 보정 결과/);
+    assert.match(await page.locator('#correction-report-title').innerText(), /획 굵기 맞춤 결과/);
+    for (const ch of requested) assert.deepEqual(previews[1].report.byChar[ch], on.meta.byChar[ch], `${ch}: preview and full safety status differ`);
     await page.locator('#auto-stroke').uncheck(); const off = await build('full-off.ttf');
     assert.equal(off.meta.original.off, 25); assert.equal(off.meta.composed.off, 11147);
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('geulmoa-drawing-v1')).samples), saved);
     const meta = path.join(OUT, 'full-metadata.json'); fs.writeFileSync(meta, JSON.stringify(on.meta.byChar));
-    const py = `from fontTools.ttLib import TTFont\nimport sys,json,collections\na,b=map(TTFont,sys.argv[1:3]); meta=json.load(open(sys.argv[3],encoding='utf8'))\nca,cb=a.getBestCmap(),b.getBestCmap()\nassert all(i in ca and i in cb for i in range(0xac00,0xd7a4))\nassert len(meta)==11172\ndef shape(f,cmap,c):\n g=f['glyf'][cmap[ord(c)]]\n coords,ends,flags=g.getCoordinates(f['glyf'])\n return (tuple(coords),tuple(ends),tuple(flags))\ncounts=collections.Counter(); changed=collections.Counter(); failed=[]\nfor ch,info in meta.items():\n s=info['status']; counts[s]+=1\n same=shape(a,ca,ch)==shape(b,cb,ch)\n if s in ('kept','same') and not same: failed.append((ch,s,info['reasons']))\n if not same: changed[s]+=1\nassert not failed,('unsafe or unchanged glyph differs',failed[:10])\nassert changed['adjusted']>100 and changed['partial']>100,changed\nprint('11,172 glyphs verified; per-status counts',dict(counts),'actual changed',dict(changed))`;
-    console.log(execFileSync('python', ['-c', py, on.file, off.file, meta], { encoding: 'utf8', maxBuffer: 1024 * 1024 }).trim());
+    const py = `from fontTools.ttLib import TTFont\nimport sys,json,collections\na,b=map(TTFont,sys.argv[1:3]); meta=json.load(open(sys.argv[3],encoding='utf8'))\npbefore,pafter=map(TTFont,sys.argv[4:6]); requested=sys.argv[6]\nca,cb=a.getBestCmap(),b.getBestCmap()\nassert all(i in ca and i in cb for i in range(0xac00,0xd7a4))\nassert len(meta)==11172\ndef shape(f,cmap,c):\n g=f['glyf'][cmap[ord(c)]]\n coords,ends,flags=g.getCoordinates(f['glyf'])\n return (tuple(coords),tuple(ends),tuple(flags))\ncounts=collections.Counter(); changed=collections.Counter(); failed=[]\nfor ch,info in meta.items():\n s=info['status']; counts[s]+=1\n same=shape(a,ca,ch)==shape(b,cb,ch)\n if s in ('kept','same') and not same: failed.append((ch,s,info['reasons']))\n if not same: changed[s]+=1\nassert not failed,('unsafe or unchanged glyph differs',failed[:10])\nassert changed['adjusted']>100 and changed['partial']>100,changed\nfor ch in requested:\n assert shape(pbefore,pbefore.getBestCmap(),ch)==shape(b,cb,ch),(ch,'preview before differs from full')\n assert shape(pafter,pafter.getBestCmap(),ch)==shape(a,ca,ch),(ch,'preview after differs from full')\n for preview,full in [(pbefore,b),(pafter,a)]:\n  assert preview['hmtx'][preview.getBestCmap()[ord(ch)]]==full['hmtx'][full.getBestCmap()[ord(ch)]],ch\nprint('11,172 glyphs verified; per-status counts',dict(counts),'actual changed',dict(changed),'preview equivalence',len(requested))`;
+    console.log(execFileSync('python', ['-c', py, on.file, off.file, meta, ...previewFiles, requested], { encoding: 'utf8', maxBuffer: 1024 * 1024 }).trim());
     assert(await page.evaluate(() => window.__ticks) > 10, 'worker allows the main page to run');
     assert.deepEqual(errors, []);
     console.log(`${browserName}: full default-on TTF ${on.ms}ms; baseline ${off.ms}ms; ${fs.statSync(on.file).size} bytes; every retained/same outline preserved`);
